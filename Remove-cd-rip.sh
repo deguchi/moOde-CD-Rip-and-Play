@@ -50,11 +50,9 @@
 ##################################################################
 
 # Returns full path and name of this script.
-# /home/pi/Src/cd-rip/Remove-cd-rip.sh
 readonly	FULLPATHNAME=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null||echo "$0")
 
 # The directory where this script resides.
-# /home/pi/Src/cd-rip
 readonly	DIRECTORY=$(dirname "${FULLPATHNAME}")
 
 # The file with the list of cd genres to convert to abcde genres.
@@ -352,7 +350,8 @@ HILITE="${BCyan}"
 echo ""
 echo -e "Remove the installed cd ripper software being used with ${HILITE}'moOde'${Colour_Off}."
 
-if [ ! -f "/var/www/command/moode.php" ]; then
+# Detect moOde installation: check for moode.php (moOde <= 8.x) or moode systemd service (moOde 9+).
+if [ ! -f "/var/www/command/moode.php" ] && ! systemctl list-unit-files 2>/dev/null | grep -q "moode"; then
 	echo ""
 	echo -e "${BYellow}This is not a 'moOde' installation.${Colour_Off}"
 	echo ""
@@ -680,7 +679,6 @@ _display_ok
 # Check for the music cd directory.
 ##################################################################
 
-# /home/pi/Music-CD
 readonly	MY_MUSIC_CD_DIR="${MUSIC_HOME_PATH}/${RIPPED_MUSIC_DIR}"
 
 echo "Checking for the cd music storage directory: ${MY_MUSIC_CD_DIR}"

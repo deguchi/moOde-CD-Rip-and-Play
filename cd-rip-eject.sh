@@ -45,7 +45,7 @@
 # The software version.
 ##################################################################
 
-readonly	_SW_VERSION="1.0"
+readonly	_SW_VERSION="2.0"
 
 ##################################################################
 # Work out the CDROM path. Must have no trailing slash.

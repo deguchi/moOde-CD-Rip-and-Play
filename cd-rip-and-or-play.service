@@ -1,5 +1,8 @@
 # We will use a oneshot service that can be called but doesn't persist. This is
 # needed because tasks called directly from udev that take longer than 60s get timed out.
+#
+# NOTE: WorkingDirectory and ExecStart paths are updated by Install-cd-rip.sh
+# to match the actual installation directory.
 
 [Unit]
 Description=CD rip and-or play on insertion
@@ -8,16 +11,11 @@ After=udisks-glue
 [Service]
 Type=oneshot
 
-# user=pi
-# group=pi
-
 RemainAfterExit=no
 
-# Ensure that this has the same path as in 'ExecStart'.
-WorkingDirectory=/home/pi/Src/cd-rip
-
-# Ensure that this has the same path as in 'WorkingDirectory'.
-ExecStart=/home/pi/Src/cd-rip/cd-rip-and-or-play.sh
+# These paths are updated automatically by Install-cd-rip.sh
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/cd-rip-and-or-play.sh
 
 ExecStop=killall -q abcde
 

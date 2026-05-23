@@ -63,11 +63,9 @@ fi
 ##################################################################
 
 # Returns full path and name of this script.
-# /home/pi/Src/cd-rip/cd-rip-and-or-play.sh
 readonly	_FULLPATHNAME=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null||echo "$0")
 
 # The directory where this script resides.
-# /home/pi/Src/cd-rip
 readonly	_DIRECTORY=$(dirname "${_FULLPATHNAME}")
 
 # Returns the script name with no paths or suffix.
@@ -83,10 +81,8 @@ readonly	_LOCKNAME="/var/lock/${_SCRIPTNAME}.lock"
 readonly	_DEFAULT_CD_COVER="${_DIRECTORY}/default-cd-cover.jpg"
 
 # The 'abcde.conf' file should be in the same directory as this cd ripping program.
-# /home/pi/Src/cd-rip/abcde.conf
 readonly	_ABCDE_CONFIG="${_DIRECTORY}/abcde.conf"
 
-# /home/pi/Src/cd-rip/cd-rip-and-or-play.conf
 readonly	_CDRIP_CONFIG="${_DIRECTORY}/${_SCRIPTNAME}.conf"
 
 # The installed encoders.
@@ -95,7 +91,7 @@ readonly	_CMD_METAFLAC="/usr/bin/metaflac"
 readonly	_CMD_MPCENC="/usr/bin/mpcenc"
 
 # This software version.
-readonly	_SW_VERSION="1.2"
+readonly	_SW_VERSION="2.0"
 
 
 
@@ -103,6 +99,15 @@ readonly	_SW_VERSION="1.2"
 # Changes.
 ##################################################################
 
+# Version 2.0	2026
+#
+#	Updated for moOde 8.3+ / 9.x / 10.x compatibility:
+#	- Removed hardcoded 'pi' user; dynamic user detection.
+#	- Systemd service files use dynamic install paths.
+#	- rotvol.sh fallback to 'mpc volume' for newer moOde.
+#	- /bin/* paths updated to /usr/bin/* for Debian Trixie.
+#	- Compatible with Raspberry Pi 3/4/5.
+#
 # Version 1.1	Sat 6-Jun-2020
 #
 #	Added code to only rip and tag one track when in debug mode and
@@ -793,7 +798,6 @@ if [[ ! -s "${_ABCDE_CONFIG}" ]]; then
 	_log_fatal_and_exit 16 "Cannot find configuration file: ${_ABCDE_CONFIG}"
 fi
 
-# Using config file: /home/pi/Src/cd-rip/abcde.conf
 _log_debug "Using config file: ${_ABCDE_CONFIG}"
 
 ##################################################################
@@ -1066,12 +1070,17 @@ if [ 0 -ne "${RV}" ]; then
 
 
 	# Truncate the library cache so Library panel reloads from scratch.
-	${CMD_TRUNCATE} "${MOODE_LIB_CACHE_FILE}" --size 0 > /dev/null
+	# The cache file may not exist on newer moOde versions.
+	if [ -f "${MOODE_LIB_CACHE_FILE}" ]; then
+		${CMD_TRUNCATE} "${MOODE_LIB_CACHE_FILE}" --size 0 > /dev/null
 
-	RV=$?
+		RV=$?
 
-	if [[ 0 != "${RV}" ]] ; then
-		_log_warn "Cannot truncate '${MOODE_LIB_CACHE_FILE}'"
+		if [[ 0 != "${RV}" ]] ; then
+			_log_warn "Cannot truncate '${MOODE_LIB_CACHE_FILE}'"
+		fi
+	else
+		_log_debug "Library cache file not found: '${MOODE_LIB_CACHE_FILE}', skipping truncate."
 	fi
 
 	_eject_cd
@@ -1367,7 +1376,13 @@ else
 			if [ "0%" = "${_G_MPD_VOLUME}" ]; then
 				_log_debug "Tracks have been added. Changing the volume from 0 to ${DEFAULT_VOLUME}"
 
-				{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				# Use rotvol.sh if available (moOde <= 8.x), otherwise fall back to mpc volume.
+				if [ -x "${CMD_ROTVOL}" ]; then
+					{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				else
+					_log_debug "rotvol.sh not found, using 'mpc volume' instead."
+					{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				fi
 				_write_to_pipe "Volume ${DEFAULT_VOLUME}"
 			fi
 

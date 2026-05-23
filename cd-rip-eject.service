@@ -1,3 +1,6 @@
+# NOTE: ExecStart path is updated by Install-cd-rip.sh
+# to match the actual installation directory.
+
 [Unit]
 Description=Audio cd ejection
 After=udisks-glue
@@ -5,12 +8,10 @@ After=udisks-glue
 [Service]
 Type=simple
 
-# user=pi
-# group=pi
-
 RemainAfterExit=no
 
-ExecStart=/home/pi/Src/cd-rip/cd-rip-eject.sh
+# This path is updated automatically by Install-cd-rip.sh
+ExecStart=__INSTALL_DIR__/cd-rip-eject.sh
 
 ExecStop=killall -q cd-rip-and-or-play.sh
 

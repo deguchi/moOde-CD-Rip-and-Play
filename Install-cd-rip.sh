@@ -50,11 +50,9 @@
 ##################################################################
 
 # Returns full path and name of this script.
-# /home/pi/Src/cd-rip/cd-rip-and-or-play.sh
 readonly	FULLPATHNAME=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null||echo "$0")
 
 # The directory where this script resides.
-# /home/pi/Src/cd-rip
 readonly	DIRECTORY=$(dirname "${FULLPATHNAME}")
 
 readonly	CD_RIP_AND_OR_PLAY="cd-rip-and-or-play"
@@ -347,7 +345,8 @@ HILITE="${BCyan}"
 echo ""
 echo -e "Install the cd ripper software from files in this directory for use with ${HILITE}'moOde'${Colour_Off}."
 
-if [ ! -f "/var/www/command/moode.php" ]; then
+# Detect moOde installation: check for moode.php (moOde <= 8.x) or moode systemd service (moOde 9+).
+if [ ! -f "/var/www/command/moode.php" ] && ! systemctl list-unit-files 2>/dev/null | grep -q "moode"; then
 	echo ""
 	echo -e "${BYellow}This is not a 'moOde' installation.${Colour_Off}"
 	echo ""
@@ -617,7 +616,6 @@ _display_ok
 # Create the music cd directory if required.
 ##################################################################
 
-# /home/pi/Music-CD
 MY_MUSIC_CD_DIR="${MUSIC_HOME_PATH}/${RIPPED_MUSIC_DIR}"
 
 echo "Checking for the cd music storage directory: ${MY_MUSIC_CD_DIR}"
@@ -647,8 +645,6 @@ _display_ok
 ##################################################################
 # Create the music cd sub directory if required.
 ##################################################################
-
-# /home/pi/Music-CD/${MUSIC_CD_SUB_DIR}
 
 # If not empty.
 if [[ -n "${MUSIC_SUB_DIR}" ]]; then
@@ -749,11 +745,8 @@ if [[ -d "${MNT_CD}" || -h "${MNT_CD}" ]]; then
 	# Do nothing.
 	:
 else
-	# CD /home/pi/Music-CD
 	echo "Creating link: '${MUSIC_MNT_SOURCE}' to: '${MY_MUSIC_CD_DIR}'"
 
-	# If the target does not exist.
-	# ln -s -T "/home/pi/Music-CD" "CD"
 	ln -s -T "${MY_MUSIC_CD_DIR}" "${MUSIC_MNT_SOURCE}"
 
 	_check_command_and_exit_if_error "${?}" 30 "Cannot create link to: ${MY_MUSIC_CD_DIR}"
@@ -820,6 +813,24 @@ _display_ok
 
 
 ##################################################################
+# Update the systemd service files with the actual install directory.
+##################################################################
+
+echo "Updating systemd service files with install directory: ${DIRECTORY}"
+
+for _SVCFILE in "${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_EJECT_SERVICE}"; do
+	if grep -q "__INSTALL_DIR__" "${_SVCFILE}" 2>/dev/null; then
+		sed -i "s|__INSTALL_DIR__|${DIRECTORY}|g" "${_SVCFILE}"
+
+		_check_command_and_exit_if_error "${?}" 45 "Cannot update paths in service file: ${_SVCFILE}"
+	fi
+done
+
+_display_ok
+
+
+
+##################################################################
 # Create the 'udev' and 'systemd' entries.
 ##################################################################
 
@@ -834,7 +845,6 @@ _check_command_and_exit_if_error "${?}" 35 "Cannot change directory to: /etc/ude
 if [[ -L "${UDEV_RULE}" ]]; then
 	echo "Udev rules link already exists to: ${DIRECTORY}/${UDEV_RULE}"
 else
-	# /home/pi/Src/cd-rip/99-srX.rules
 	echo "Creating udev link to: '${DIRECTORY}/${UDEV_RULE}'"
 
 	ln -s "${DIRECTORY}/${UDEV_RULE}" "."
@@ -855,7 +865,6 @@ _check_command_and_exit_if_error "${?}" 37 "Cannot change directory to: /etc/sys
 if [[ -L "${SYSTEMD_RIP_SERVICE}" ]]; then
 	echo "Systemd link already exists to: ${SYSTEMD_RIP_SERVICE}"
 else
-	# /home/pi/Src/cd-rip/cd-rip-and-or-play.service
 	echo "Creating systemd link to: '${DIRECTORY}/${SYSTEMD_RIP_SERVICE}'"
 
 	ln -s "${DIRECTORY}/${SYSTEMD_RIP_SERVICE}" "."
@@ -867,7 +876,6 @@ fi
 if [[ -L "${SYSTEMD_EJECT_SERVICE}" ]]; then
 	echo "Systemd link already exists to: ${SYSTEMD_EJECT_SERVICE}"
 else
-	# /home/pi/Src/cd-rip/cd-rip-eject.service
 	echo "Creating systemd link to: '${DIRECTORY}/${SYSTEMD_EJECT_SERVICE}'"
 
 	ln -s "${DIRECTORY}/${SYSTEMD_EJECT_SERVICE}" "."
@@ -894,7 +902,6 @@ _check_command_and_exit_if_error "${?}" 40 "Cannot change directory to: /etc/log
 if [[ -L "${CD_RIP_AND_OR_PLAY}" ]]; then
 	echo "Logrotate link already exists to: ${DIRECTORY}/${CD_RIP_AND_OR_PLAY}"
 else
-	# /home/pi/Src/cd-rip/cd-rip-and-or-play
 	echo "Creating logrotate link to: '${DIRECTORY}/${CD_RIP_AND_OR_PLAY}'"
 
 	ln -s "${DIRECTORY}/${CD_RIP_AND_OR_PLAY}" "."
