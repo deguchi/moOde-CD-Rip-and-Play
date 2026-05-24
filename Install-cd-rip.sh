@@ -824,12 +824,12 @@ for _SVCPAIR in "${SYSTEMD_RIP_SERVICE_TEMPLATE}:${SYSTEMD_RIP_SERVICE}" "${SYST
 	_TEMPLATE="${_SVCPAIR%:*}"
 	_TARGET="${_SVCPAIR#*:}"
 
-	sed "s|__INSTALL_DIR__|${DIRECTORY}|g" "${_TEMPLATE}" > "${_TARGET}"
+	sed "s|__INSTALL_DIR__|${DIRECTORY}|g" "${DIRECTORY}/${_TEMPLATE}" > "${DIRECTORY}/${_TARGET}"
 
 	_check_command_and_exit_if_error "${?}" 45 "Cannot generate service file: ${_TARGET} from template: ${_TEMPLATE}"
 
-	chmod 444 "${_TARGET}"
-	chown "${RIPPED_MUSIC_OWNER}" "${_TARGET}"
+	chmod 444 "${DIRECTORY}/${_TARGET}"
+	chown "${RIPPED_MUSIC_OWNER}" "${DIRECTORY}/${_TARGET}"
 done
 
 _display_ok

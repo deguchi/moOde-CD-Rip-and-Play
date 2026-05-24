@@ -576,11 +576,10 @@ else
 fi
 
 # Remove generated service files from install directory.
-_cd_func "${DIRECTORY}"
 for _SVCFILE in "${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_EJECT_SERVICE}"; do
-	if [[ -f "${_SVCFILE}" ]]; then
+	if [[ -f "${DIRECTORY}/${_SVCFILE}" ]]; then
 		echo "Removing generated service file: '${_SVCFILE}'"
-		rm -f "${_SVCFILE}"
+		rm -f "${DIRECTORY}/${_SVCFILE}"
 	fi
 done
 
