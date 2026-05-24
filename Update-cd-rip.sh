@@ -72,8 +72,10 @@ readonly	GENRES_TO_CONVERT_FILE="genres-to-convert.txt"
 readonly	UDEV_RULE="99-srX.rules"
 
 readonly	SYSTEMD_EJECT_SERVICE="cd-rip-eject.service"
+readonly	SYSTEMD_EJECT_SERVICE_TEMPLATE="${SYSTEMD_EJECT_SERVICE}.in"
 
 readonly	SYSTEMD_RIP_SERVICE="${CD_RIP_AND_OR_PLAY}.service"
+readonly	SYSTEMD_RIP_SERVICE_TEMPLATE="${SYSTEMD_RIP_SERVICE}.in"
 
 
 
@@ -424,7 +426,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "Checking our files exist."
 
-for _FILE in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE}" "${SYSTEMD_RIP_SERVICE}" "${CD_RIP_AND_OR_PLAY}" "abcde.conf" \
+for _FILE in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE_TEMPLATE}" "${SYSTEMD_RIP_SERVICE_TEMPLATE}" "${CD_RIP_AND_OR_PLAY}" "abcde.conf" \
 		"cd-rip-and-or-play.sh" "${CDRIP_CONFIG}" "cd-rip-eject.sh" "Install-cd-rip.sh" "Remove-cd-rip.sh"
 do
 	# If the file does not exist.
@@ -593,7 +595,8 @@ _display_ok
 
 echo "Deleting the old files."
 
-for _FILE in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE}" "${SYSTEMD_RIP_SERVICE}" "${CD_RIP_AND_OR_PLAY}" "abcde.conf" \
+for _FILE in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE}" "${SYSTEMD_EJECT_SERVICE_TEMPLATE}" \
+		"${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_RIP_SERVICE_TEMPLATE}" "${CD_RIP_AND_OR_PLAY}" "abcde.conf" \
 		"cd-rip-and-or-play.sh" "${CDRIP_CONFIG}" "cd-rip-eject.sh" "Install-cd-rip.sh" "Remove-cd-rip.sh" \
 		"Update-cd-rip.sh" "changelog.txt" "genres-to-convert" "LICENSE" "README.md" "VERSION"
 do

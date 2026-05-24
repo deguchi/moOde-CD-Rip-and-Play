@@ -65,8 +65,10 @@ readonly	CDRIP_CONFIG="${CD_RIP_AND_OR_PLAY}.conf"
 readonly	UDEV_RULE="99-srX.rules"
 
 readonly	SYSTEMD_EJECT_SERVICE="cd-rip-eject.service"
+readonly	SYSTEMD_EJECT_SERVICE_TEMPLATE="${SYSTEMD_EJECT_SERVICE}.in"
 
 readonly	SYSTEMD_RIP_SERVICE="${CD_RIP_AND_OR_PLAY}.service"
+readonly	SYSTEMD_RIP_SERVICE_TEMPLATE="${SYSTEMD_RIP_SERVICE}.in"
 
 
 
@@ -481,7 +483,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "Checking our files exist and set the owners and file mode."
 
-for FILE_TO_CHECK in "${UDEV_RULE}",444 "${SYSTEMD_EJECT_SERVICE}",444 "${SYSTEMD_RIP_SERVICE}",444 \
+for FILE_TO_CHECK in "${UDEV_RULE}",444 "${SYSTEMD_EJECT_SERVICE_TEMPLATE}",444 "${SYSTEMD_RIP_SERVICE_TEMPLATE}",444 \
 			"${GENRES_FILE_TO_CONVERT}",444 "abcde.conf",644 "cd-rip-and-or-play",644 \
 			"cd-rip-and-or-play.sh",544 "${CDRIP_CONFIG}",644 "cd-rip-eject.sh",544 \
 			 "Install-cd-rip.sh",544 "Remove-cd-rip.sh",544
@@ -813,17 +815,21 @@ _display_ok
 
 
 ##################################################################
-# Update the systemd service files with the actual install directory.
+# Generate systemd service files from templates.
 ##################################################################
 
-echo "Updating systemd service files with install directory: ${DIRECTORY}"
+echo "Generating systemd service files from templates with install directory: ${DIRECTORY}"
 
-for _SVCFILE in "${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_EJECT_SERVICE}"; do
-	if grep -q "__INSTALL_DIR__" "${_SVCFILE}" 2>/dev/null; then
-		sed -i "s|__INSTALL_DIR__|${DIRECTORY}|g" "${_SVCFILE}"
+for _SVCPAIR in "${SYSTEMD_RIP_SERVICE_TEMPLATE}:${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_EJECT_SERVICE_TEMPLATE}:${SYSTEMD_EJECT_SERVICE}"; do
+	_TEMPLATE="${_SVCPAIR%:*}"
+	_TARGET="${_SVCPAIR#*:}"
 
-		_check_command_and_exit_if_error "${?}" 45 "Cannot update paths in service file: ${_SVCFILE}"
-	fi
+	sed "s|__INSTALL_DIR__|${DIRECTORY}|g" "${_TEMPLATE}" > "${_TARGET}"
+
+	_check_command_and_exit_if_error "${?}" 45 "Cannot generate service file: ${_TARGET} from template: ${_TEMPLATE}"
+
+	chmod 444 "${_TARGET}"
+	chown "${RIPPED_MUSIC_OWNER}" "${_TARGET}"
 done
 
 _display_ok

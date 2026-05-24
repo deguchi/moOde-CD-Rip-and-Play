@@ -70,8 +70,10 @@ readonly	CDRIP_CONFIG="${CD_RIP_AND_OR_PLAY}.conf"
 readonly	UDEV_RULE="99-srX.rules"
 
 readonly	SYSTEMD_EJECT_SERVICE="cd-rip-eject.service"
+readonly	SYSTEMD_EJECT_SERVICE_TEMPLATE="${SYSTEMD_EJECT_SERVICE}.in"
 
 readonly	SYSTEMD_RIP_SERVICE="${CD_RIP_AND_OR_PLAY}.service"
+readonly	SYSTEMD_RIP_SERVICE_TEMPLATE="${SYSTEMD_RIP_SERVICE}.in"
 
 
 
@@ -448,7 +450,7 @@ echo "--------------------------------------------------------------------------
 echo ""
 echo "Checking that our cd ripper files exist."
 
-for FILE_TO_CHECK in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE}" "${SYSTEMD_RIP_SERVICE}" "cd-rip-and-or-play.sh" \
+for FILE_TO_CHECK in "${UDEV_RULE}" "${SYSTEMD_EJECT_SERVICE_TEMPLATE}" "${SYSTEMD_RIP_SERVICE_TEMPLATE}" "cd-rip-and-or-play.sh" \
 			"abcde.conf" "${CDRIP_CONFIG}" "cd-rip-eject.sh" "Install-cd-rip.sh" "Remove-cd-rip.sh"
 do
 	# If the file does not exist.
@@ -572,6 +574,15 @@ if [[ -L "${SYSTEMD_EJECT_SERVICE}" ]]; then
 else
 	echo "No systemd link found to remove: '${SYSTEMD_EJECT_SERVICE}'"
 fi
+
+# Remove generated service files from install directory.
+_cd_func "${DIRECTORY}"
+for _SVCFILE in "${SYSTEMD_RIP_SERVICE}" "${SYSTEMD_EJECT_SERVICE}"; do
+	if [[ -f "${_SVCFILE}" ]]; then
+		echo "Removing generated service file: '${_SVCFILE}'"
+		rm -f "${_SVCFILE}"
+	fi
+done
 
 _display_ok
 
