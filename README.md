@@ -35,8 +35,10 @@ Raspberry Pi 4 and 5 should also work but have not been tested.
 
 # Requirements
 
-  A working moOde image (v6.5.0+ for the original, v10.x for this fork) on a Raspberry Pi.
-  An external CD drive attached to the USB port.
+- moOde audio player v10.x (tested on v10.2.0)
+- Raspberry Pi 3 / 4 / 5
+- Raspberry Pi OS Trixie (Debian 13)
+- An external USB CD drive
 
 # Download
 
