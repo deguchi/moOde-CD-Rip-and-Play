@@ -1094,6 +1094,14 @@ if [ 0 -ne "${RV}" ]; then
 
 	_log_result "${_G_RESULT}"
 
+	# Trigger moOde WebUI library update (rebuilds thumbnails and cache).
+	_G_RESULT=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost/command/music-library.php?cmd=update_library" 2>&1)
+	if [ "${_G_RESULT}" = "200" ]; then
+		_log_ok "moOde library update triggered."
+	else
+		_log_warn "moOde library update request failed (HTTP ${_G_RESULT})."
+	fi
+
 	_write_to_pipe "Ripping-done"
 fi	# End of 'if [ 0 -ne "${RV}" ]; then'
 
