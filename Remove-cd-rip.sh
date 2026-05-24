@@ -350,8 +350,8 @@ HILITE="${BCyan}"
 echo ""
 echo -e "Remove the installed cd ripper software being used with ${HILITE}'moOde'${Colour_Off}."
 
-# Detect moOde installation: check for moode.php (moOde <= 8.x) or moode systemd service (moOde 9+).
-if [ ! -f "/var/www/command/moode.php" ] && ! systemctl list-unit-files 2>/dev/null | grep -q "moode"; then
+# Detect moOde installation: check for moode.php (moOde <= 8.x) or playback.php (moOde 10+).
+if [ ! -f "/var/www/command/moode.php" ] && [ ! -f "/var/www/command/playback.php" ]; then
 	echo ""
 	echo -e "${BYellow}This is not a 'moOde' installation.${Colour_Off}"
 	echo ""
