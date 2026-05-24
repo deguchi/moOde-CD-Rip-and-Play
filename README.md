@@ -10,6 +10,13 @@ It allows a user to play their CDs without using the moOde interface. The volume
 
 Is copying CDs legal? If you are not sure what the position is for the country you live in, please check your local copyright law to make sure that you are on the right side of the law before using the software featured here.
 
+## Requirements
+
+- moOde audio player v10.x (tested on v10.2.0)
+- Raspberry Pi 3 / 4 / 5
+- Raspberry Pi OS Trixie (Debian 13)
+- An external USB CD drive
+
 ### Tested on
 
 | Component        | Version            |
@@ -20,16 +27,7 @@ Is copying CDs legal? If you are not sure what the position is for the country y
 
 Raspberry Pi 4 and 5 should also work but have not been tested.
 
-## Requirements
-
-- moOde audio player v10.x (tested on v10.2.0)
-- Raspberry Pi 3 / 4 / 5
-- Raspberry Pi OS Trixie (Debian 13)
-- An external USB CD drive
-
 ## Installation
-
-Download and install:
 
 ```shell
 git clone https://github.com/deguchi/moOde-CD-Rip-and-Play.git
