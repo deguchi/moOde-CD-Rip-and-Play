@@ -58,6 +58,7 @@ The ripped music will be left untouched, but the hidden disc id directory `.Musi
 ```shell
 cd ~/moOde-CD-Rip-and-Play
 git pull
+chmod 544 *.sh
 sudo ./Install-cd-rip.sh
 ```
 
