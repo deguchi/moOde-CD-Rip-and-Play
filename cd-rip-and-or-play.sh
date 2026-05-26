@@ -588,6 +588,277 @@ _abcde_exit_error() {
 
 
 
+##################################################################
+# Early Playback functions.
+# Rip initial tracks as WAV for immediate playback while abcde
+# runs in the background for the full encode.
+##################################################################
+
+# Flag to track if early playback is active.
+_EARLY_PLAYBACK_ACTIVE=0
+
+##################################################################
+# Calculate track durations from cd-discid output.
+#
+# cd-discid format: <discid> <numtracks> <offset1> ... <offsetN> <leadout_seconds>
+# Offsets are in CD sectors (75 sectors = 1 second).
+# Leadout (last value) is total disc length in seconds.
+#
+# Sets: _G_TRACK_DURATIONS[1..N], _G_TOTAL_CD_SECONDS
+##################################################################
+
+_calculate_track_durations() {
+	local _FIELDS
+	read -ra _FIELDS <<< "${_G_CD_ID}"
+
+	local _NUM=${_FIELDS[1]}
+	local _LEADOUT_SEC=${_FIELDS[$((2 + _NUM))]}
+
+	_G_TOTAL_CD_SECONDS=${_LEADOUT_SEC}
+
+	for (( i=1; i<=_NUM; i++ )); do
+		local _START=${_FIELDS[$((i + 1))]}
+		if (( i < _NUM )); then
+			local _END=${_FIELDS[$((i + 2))]}
+			_G_TRACK_DURATIONS[$i]=$(( (_END - _START) / 75 ))
+		else
+			# Last track: leadout is in seconds, offset is in sectors
+			local _START_SEC=$(( _START / 75 ))
+			_G_TRACK_DURATIONS[$i]=$(( _LEADOUT_SEC - _START_SEC ))
+		fi
+	done
+
+	_log_debug "Total CD length: ${_G_TOTAL_CD_SECONDS} seconds"
+	for (( i=1; i<=_NUM; i++ )); do
+		_log_debug "Track ${i}: ${_G_TRACK_DURATIONS[$i]} seconds"
+	done
+}
+
+
+
+##################################################################
+# Determine how many preview tracks to rip.
+#
+# Sets: _G_PREVIEW_TRACK_COUNT
+##################################################################
+
+_determine_preview_tracks() {
+	local _ESTIMATED_ABCDE_TIME=$(( _G_TOTAL_CD_SECONDS / EARLY_PLAYBACK_SPEED_DIVISOR ))
+	local _SUM=0
+
+	_G_PREVIEW_TRACK_COUNT=0
+
+	_log_log "Estimated abcde time: ${_ESTIMATED_ABCDE_TIME} seconds"
+
+	for (( i=1; i<=_G_TRACKS; i++ )); do
+		_SUM=$(( _SUM + _G_TRACK_DURATIONS[$i] ))
+		_G_PREVIEW_TRACK_COUNT=$i
+
+		if (( _SUM >= _ESTIMATED_ABCDE_TIME )); then
+			break
+		fi
+
+		if (( _G_PREVIEW_TRACK_COUNT >= EARLY_PLAYBACK_MAX_TRACKS )); then
+			break
+		fi
+	done
+
+	# Ensure at least 1 track
+	if (( _G_PREVIEW_TRACK_COUNT < 1 )); then
+		_G_PREVIEW_TRACK_COUNT=1
+	fi
+
+	_log_log "Preview tracks: ${_G_PREVIEW_TRACK_COUNT} (${_SUM} seconds of buffer)"
+}
+
+
+
+##################################################################
+# Set up preview playback: rip WAV, create symlink, start MPD.
+#
+# Sets: _EARLY_PLAYBACK_ACTIVE=1 on success
+##################################################################
+
+_setup_preview_playback() {
+	_log_log "Setting up early playback..."
+
+	# Create temp directory
+	${CMD_MKDIR} -p "${EARLY_PLAYBACK_TEMP_DIR}"
+	if [ ! -d "${EARLY_PLAYBACK_TEMP_DIR}" ]; then
+		_log_warn "Cannot create preview temp dir, falling back to normal mode."
+		return
+	fi
+
+	# Create symlink under MPD music_directory
+	ln -sfn "${EARLY_PLAYBACK_TEMP_DIR}" "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
+	if [ ! -L "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}" ]; then
+		_log_warn "Cannot create MPD symlink, falling back to normal mode."
+		${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
+		return
+	fi
+
+	# Save current playlist (same logic as existing code)
+	{ ${CMD_MPC} -q rm "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
+	{ ${CMD_MPC} -q save "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
+	{ ${CMD_MPC} -q clear 2>&1; } > /dev/null
+
+	# Rip preview tracks with cdparanoia (no paranoia for speed)
+	for (( i=1; i<=_G_PREVIEW_TRACK_COUNT; i++ )); do
+		local _PADDED
+		_PADDED=$(printf "%02d" ${i})
+		local _WAV_FILE="${EARLY_PLAYBACK_TEMP_DIR}/track${_PADDED}.wav"
+
+		_log_log "Preview ripping track ${i}/${_G_PREVIEW_TRACK_COUNT}..."
+
+		${CMD_CDPARANOIA} -Z -d "${CDROM}" "${i}" "${_WAV_FILE}" >> "${LOGFILE}" 2>&1
+
+		if [ ! -f "${_WAV_FILE}" ]; then
+			_log_warn "Failed to rip preview track ${i}, falling back to normal mode."
+			${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
+			${CMD_RM} -f "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
+			return
+		fi
+
+		_log_ok "Preview track ${i} ripped: ${_WAV_FILE}"
+	done
+
+	# Update MPD database for the preview symlink
+	${CMD_MPC} update "${EARLY_PLAYBACK_MPD_TAG}" > /dev/null 2>&1
+
+	# Wait for MPD to finish scanning
+	${CMD_SLEEP} 2
+
+	# Add preview tracks to MPD queue
+	for (( i=1; i<=_G_PREVIEW_TRACK_COUNT; i++ )); do
+		local _PADDED
+		_PADDED=$(printf "%02d" ${i})
+		${CMD_MPC} -q add "${EARLY_PLAYBACK_MPD_TAG}/track${_PADDED}.wav" 2>&1
+	done
+
+	# Set volume if needed
+	local _VOL
+	_VOL=$(${CMD_MPC} volume 2>&1 | grep -o '[0-9]*')
+	if [ "${_VOL}" = "0" ]; then
+		if [ -x "${CMD_ROTVOL}" ]; then
+			{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+		else
+			{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+		fi
+	fi
+
+	# Start playback
+	${CMD_MPC} play > /dev/null 2>&1
+
+	_EARLY_PLAYBACK_ACTIVE=1
+
+	_log_ok "Early playback started with ${_G_PREVIEW_TRACK_COUNT} preview track(s)."
+	_write_to_pipe "Mpd-play"
+}
+
+
+
+##################################################################
+# Transition from WAV preview to FLAC tracks after abcde completes.
+##################################################################
+
+_transition_to_flac() {
+	_log_log "Transitioning from WAV preview to FLAC..."
+
+	# Update MPD to recognize new FLAC files
+	${CMD_MPC} update > /dev/null 2>&1
+	${CMD_SLEEP} 3
+
+	# Find the disc ID file
+	local _DISC_ID_FILE
+	_DISC_ID_FILE=$(${CMD_LS} "${_G_CD_DISC_ID}"\ -*._* 2>/dev/null | head -1)
+
+	if [ -z "${_DISC_ID_FILE}" ]; then
+		_log_error "Cannot find disc ID file for FLAC transition."
+		return
+	fi
+
+	_log_debug "Reading disc ID file: ${_DISC_ID_FILE}"
+
+	# Parse the disc ID file and add FLAC tracks after the preview tracks
+	local _LINE_COUNT=0
+	local _FOUND_MARKER=0
+	local _TRACK_NUM=0
+
+	while IFS= read -r _L_LINE; do
+		_LINE_COUNT=$((_LINE_COUNT + 1))
+
+		if [ -n "${_L_LINE}" ]; then
+			if [ 0 -eq ${_FOUND_MARKER} ]; then
+				if [[ "${_L_LINE}" == "##############################"* ]]; then
+					_FOUND_MARKER=1
+				fi
+			else
+				_TRACK_NUM=$((_TRACK_NUM + 1))
+
+				# Skip tracks that are already playing as WAV preview
+				if (( _TRACK_NUM <= _G_PREVIEW_TRACK_COUNT )); then
+					_log_debug "Skipping FLAC track ${_TRACK_NUM} (playing as WAV preview)"
+					continue
+				fi
+
+				# Add remaining FLAC tracks to queue
+				if [ -z "${MUSIC_SUB_DIR}" ]; then
+					${CMD_MPC} -q add "${LIBRARY_TAG}/${_L_LINE}" 2>&1
+				else
+					${CMD_MPC} -q add "${LIBRARY_TAG}/${MUSIC_SUB_DIR}/${_L_LINE}" 2>&1
+				fi
+
+				_log_ok "Queued FLAC track ${_TRACK_NUM}: ${_L_LINE}"
+			fi
+		fi
+	done < "${_DISC_ID_FILE}"
+
+	_log_ok "FLAC transition complete. Added tracks $((${_G_PREVIEW_TRACK_COUNT} + 1))-${_TRACK_NUM}."
+}
+
+
+
+##################################################################
+# Clean up preview WAV files after they finish playing.
+##################################################################
+
+_cleanup_preview() {
+	_log_log "Waiting for WAV preview tracks to finish playing..."
+
+	# Poll until current track is no longer a WAV preview
+	while true; do
+		local _CURRENT
+		_CURRENT=$(${CMD_MPC} current 2>/dev/null)
+
+		# If not playing or current track is not a preview WAV, we're done
+		if [ -z "${_CURRENT}" ] || [[ "${_CURRENT}" != *"${EARLY_PLAYBACK_MPD_TAG}"* ]]; then
+			# Also check if the track path in the playlist contains _cdtemp
+			local _STATUS
+			_STATUS=$(${CMD_MPC} status 2>/dev/null)
+			if [[ "${_STATUS}" != *"playing"* ]] || [[ "${_CURRENT}" != *"${EARLY_PLAYBACK_MPD_TAG}"* ]]; then
+				break
+			fi
+		fi
+
+		${CMD_SLEEP} 5
+	done
+
+	_log_log "WAV preview tracks done. Cleaning up..."
+
+	# Remove WAV files
+	${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
+
+	# Remove symlink
+	${CMD_RM} -f "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
+
+	# Update MPD to remove stale entries
+	${CMD_MPC} update "${EARLY_PLAYBACK_MPD_TAG}" > /dev/null 2>&1
+
+	_EARLY_PLAYBACK_ACTIVE=0
+
+	_log_ok "Preview cleanup complete."
+}
+
 
 
 
@@ -927,6 +1198,17 @@ if [ 0 -ne "${RV}" ]; then
 	_G_START_TIME=$(date +%s)
 
 	##################################################################
+	# Early playback: rip initial tracks as WAV and start playing
+	# while abcde handles the full rip+encode.
+	##################################################################
+
+	if [ "y" = "${EARLY_PLAYBACK}" ]; then
+		_calculate_track_durations
+		_determine_preview_tracks
+		_setup_preview_playback
+	fi
+
+	##################################################################
 	# This deals with the CD ripping.
 	##################################################################
 
@@ -1103,6 +1385,13 @@ if [ 0 -ne "${RV}" ]; then
 	fi
 
 	_write_to_pipe "Ripping-done"
+
+	# If early playback is active, transition from WAV to FLAC and clean up.
+	if [ 1 -eq "${_EARLY_PLAYBACK_ACTIVE}" ]; then
+		_transition_to_flac
+		_cleanup_preview
+		_exit_terminate 0
+	fi
 fi	# End of 'if [ 0 -ne "${RV}" ]; then'
 
 
