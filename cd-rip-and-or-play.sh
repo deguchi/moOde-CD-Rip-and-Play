@@ -674,125 +674,92 @@ _determine_preview_tracks() {
 
 
 ##################################################################
-# Set up preview playback: rip WAV, create symlink, start MPD.
+# Run abcde for specific tracks and start playback.
 #
-# Sets: _EARLY_PLAYBACK_ACTIVE=1 on success
+# Usage: _run_abcde_for_tracks "1-3" or _run_abcde_for_tracks ""
+#   Empty string = all tracks (normal mode).
+#
+# Returns: 0 on success, non-zero on failure.
 ##################################################################
 
-_setup_preview_playback() {
-	_log_log "Setting up early playback..."
+_run_abcde_for_tracks() {
+	local _TRACK_ARG="$1"
 
-	# Create temp directory
-	${CMD_MKDIR} -p "${EARLY_PLAYBACK_TEMP_DIR}"
-	if [ ! -d "${EARLY_PLAYBACK_TEMP_DIR}" ]; then
-		_log_warn "Cannot create preview temp dir, falling back to normal mode."
-		return
-	fi
+	(
+		${CMD_FLOCK} -x -w 7200 200 || _log_fatal_and_exit 20 "Ripping failed. Cannot acquire the lock."
 
-	# Create symlink under MPD music_directory
-	ln -sfn "${EARLY_PLAYBACK_TEMP_DIR}" "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
-	if [ ! -L "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}" ]; then
-		_log_warn "Cannot create MPD symlink, falling back to normal mode."
-		${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
-		return
-	fi
+		_cleanup_abcde
 
-	# Never clear the queue — always append preview tracks to the end.
-	# This prevents interrupting any currently playing music.
-	_log_log "Appending preview tracks to MPD queue."
+		export	LOG_LEVEL_NOLOG LOG_LEVEL_FATAL LOG_LEVEL_ERROR LOG_LEVEL_WARN
+		export	LOG_LEVEL_OK LOG_LEVEL_LOG LOG_LEVEL_DEBUG
+		export	_LOG_LEVEL CDROM RIPPED_MUSIC_OWNER MUSIC_DIR MUSIC_SUB_DIR
+		export	_G_DISCID_DIR TEMP_DIR LOGFILE GENRES_TO_CONVERT_FILE _DEFAULT_CD_COVER
 
-	# Rip preview tracks with cdparanoia (no paranoia for speed)
-	for (( i=1; i<=_G_PREVIEW_TRACK_COUNT; i++ )); do
-		local _PADDED
-		_PADDED=$(printf "%02d" ${i})
-		local _WAV_FILE="${EARLY_PLAYBACK_TEMP_DIR}/track${_PADDED}.wav"
+		trap	_abcde_exit_error	EXIT ERR SIGHUP SIGINT SIGQUIT SIGABRT SIGTERM
 
-		_log_log "Preview ripping track ${i}/${_G_PREVIEW_TRACK_COUNT}..."
-
-		# Use -S 16 to limit speed (same as abcde) to avoid USB bus overload on Pi 3.
-		# --never-skip=40 for error recovery, same as abcde config.
-		${CMD_CDPARANOIA} --never-skip=40 -S 16 -d "${CDROM}" "${i}" "${_WAV_FILE}" >> "${LOGFILE}" 2>&1
-
-		if [ ! -f "${_WAV_FILE}" ]; then
-			_log_warn "Failed to rip preview track ${i}, falling back to normal mode."
-			${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
-			${CMD_RM} -f "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
-			return
-		fi
-
-		_log_ok "Preview track ${i} ripped: ${_WAV_FILE}"
-	done
-
-	# Update MPD database for the preview symlink
-	${CMD_MPC} update "${EARLY_PLAYBACK_MPD_TAG}" > /dev/null 2>&1
-
-	# Wait for MPD to finish scanning
-	${CMD_SLEEP} 2
-
-	# Add preview tracks to MPD queue
-	for (( i=1; i<=_G_PREVIEW_TRACK_COUNT; i++ )); do
-		local _PADDED
-		_PADDED=$(printf "%02d" ${i})
-		${CMD_MPC} -q add "${EARLY_PLAYBACK_MPD_TAG}/track${_PADDED}.wav" 2>&1
-	done
-
-	# Only start playback if MPD is not already playing
-	local _MPD_STATUS
-	_MPD_STATUS=$(${CMD_MPC} status 2>/dev/null)
-	if [[ "${_MPD_STATUS}" != *"[playing]"* ]]; then
-		# Set volume if needed
-		local _VOL
-		_VOL=$(${CMD_MPC} volume 2>&1 | grep -o '[0-9]*')
-		if [ "${_VOL}" = "0" ]; then
-			if [ -x "${CMD_ROTVOL}" ]; then
-				{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+		if [ -n "${_TRACK_ARG}" ]; then
+			_log_log "Running abcde for tracks: ${_TRACK_ARG}"
+			{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" ${_TRACK_ARG} >> "${LOGFILE}"; } 2>&1
+		else
+			_log_log "Running abcde for all tracks."
+			if [ "${LOG_LEVEL_DEBUG}" -eq "${_LOG_LEVEL}" ]; then
+				_G_RESULT=$( { ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" 1 >> "${LOGFILE}"; } 2>&1 )
+				_log_result "${_G_RESULT}"
 			else
-				{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" >> "${LOGFILE}"; } 2>&1
 			fi
 		fi
 
-		# Start playback
-		${CMD_MPC} play > /dev/null 2>&1
-	fi
+		RV=$?
 
-	_EARLY_PLAYBACK_ACTIVE=1
+		trap	-	EXIT ERR SIGHUP SIGINT SIGQUIT SIGABRT SIGTERM
 
-	_log_ok "Early playback started with ${_G_PREVIEW_TRACK_COUNT} preview track(s)."
-	_write_to_pipe "Mpd-play"
+		export	-n	LOG_LEVEL_NOLOG LOG_LEVEL_FATAL LOG_LEVEL_ERROR LOG_LEVEL_WARN
+		export	-n	LOG_LEVEL_OK LOG_LEVEL_LOG LOG_LEVEL_DEBUG
+		export	-n	_LOG_LEVEL CDROM RIPPED_MUSIC_OWNER MUSIC_DIR MUSIC_SUB_DIR
+		export	-n	_G_DISCID_DIR TEMP_DIR LOGFILE GENRES_TO_CONVERT_FILE _DEFAULT_CD_COVER
+
+		_log_if_fatal_and_exit "${RV}" 21 "Ripping failed. 'abcde'"
+
+	) 200>"${_LOCKNAME}"
+
+	return ${?}
 }
 
 
 
 ##################################################################
-# Transition from WAV preview to FLAC tracks after abcde completes.
+# Add tracks from disc ID file to MPD queue and start playback.
+#
+# Usage: _add_tracks_to_mpd [start_from_track]
+#   start_from_track: 1-based track number to start adding from.
+#                     If omitted, adds all tracks.
 ##################################################################
 
-_transition_to_flac() {
-	_log_log "Transitioning from WAV preview to FLAC..."
-
-	# Update MPD to recognize new FLAC files
-	${CMD_MPC} update > /dev/null 2>&1
-	${CMD_SLEEP} 3
+_add_tracks_to_mpd() {
+	local _START_FROM=${1:-1}
 
 	# Find the disc ID file
 	local _DISC_ID_FILE
-	_DISC_ID_FILE=$(${CMD_LS} "${_G_CD_DISC_ID}"\ -*._* 2>/dev/null | head -1)
+	for _MODE in "flac" "mpc" "mp3"; do
+		_DISC_ID_FILE=$(${CMD_LS} "${_G_CD_DISC_ID}"\ -*._"${_MODE}" 2>/dev/null)
+		if [ -n "${_DISC_ID_FILE}" ]; then
+			break
+		fi
+	done
 
 	if [ -z "${_DISC_ID_FILE}" ]; then
-		_log_error "Cannot find disc ID file for FLAC transition."
-		return
+		_log_error "Cannot find disc ID file."
+		return 1
 	fi
 
 	_log_debug "Reading disc ID file: ${_DISC_ID_FILE}"
 
-	# Parse the disc ID file and add FLAC tracks after the preview tracks
-	local _LINE_COUNT=0
 	local _FOUND_MARKER=0
 	local _TRACK_NUM=0
+	local _ADDED=0
 
 	while IFS= read -r _L_LINE; do
-		_LINE_COUNT=$((_LINE_COUNT + 1))
-
 		if [ -n "${_L_LINE}" ]; then
 			if [ 0 -eq ${_FOUND_MARKER} ]; then
 				if [[ "${_L_LINE}" == "##############################"* ]]; then
@@ -801,68 +768,44 @@ _transition_to_flac() {
 			else
 				_TRACK_NUM=$((_TRACK_NUM + 1))
 
-				# Skip tracks that are already playing as WAV preview
-				if (( _TRACK_NUM <= _G_PREVIEW_TRACK_COUNT )); then
-					_log_debug "Skipping FLAC track ${_TRACK_NUM} (playing as WAV preview)"
+				# Skip tracks before start_from
+				if (( _TRACK_NUM < _START_FROM )); then
 					continue
 				fi
 
-				# Add remaining FLAC tracks to queue
 				if [ -z "${MUSIC_SUB_DIR}" ]; then
 					${CMD_MPC} -q add "${LIBRARY_TAG}/${_L_LINE}" 2>&1
 				else
 					${CMD_MPC} -q add "${LIBRARY_TAG}/${MUSIC_SUB_DIR}/${_L_LINE}" 2>&1
 				fi
 
-				_log_ok "Queued FLAC track ${_TRACK_NUM}: ${_L_LINE}"
+				_log_ok "Queued track ${_TRACK_NUM}: ${_L_LINE}"
+				_ADDED=1
 			fi
 		fi
 	done < "${_DISC_ID_FILE}"
 
-	_log_ok "FLAC transition complete. Added tracks $((${_G_PREVIEW_TRACK_COUNT} + 1))-${_TRACK_NUM}."
-}
-
-
-
-##################################################################
-# Clean up preview WAV files after they finish playing.
-##################################################################
-
-_cleanup_preview() {
-	_log_log "Waiting for WAV preview tracks to finish playing..."
-
-	# Poll until current track is no longer a WAV preview
-	while true; do
-		local _CURRENT
-		_CURRENT=$(${CMD_MPC} current 2>/dev/null)
-
-		# If not playing or current track is not a preview WAV, we're done
-		if [ -z "${_CURRENT}" ] || [[ "${_CURRENT}" != *"${EARLY_PLAYBACK_MPD_TAG}"* ]]; then
-			# Also check if the track path in the playlist contains _cdtemp
-			local _STATUS
-			_STATUS=$(${CMD_MPC} status 2>/dev/null)
-			if [[ "${_STATUS}" != *"playing"* ]] || [[ "${_CURRENT}" != *"${EARLY_PLAYBACK_MPD_TAG}"* ]]; then
-				break
+	# Start playback if not already playing and tracks were added
+	if [ 1 -eq ${_ADDED} ]; then
+		local _MPD_STATUS
+		_MPD_STATUS=$(${CMD_MPC} status 2>/dev/null)
+		if [[ "${_MPD_STATUS}" != *"[playing]"* ]]; then
+			local _VOL
+			_VOL=$(${CMD_MPC} volume 2>&1 | grep -o '[0-9]*')
+			if [ "${_VOL}" = "0" ]; then
+				if [ -x "${CMD_ROTVOL}" ]; then
+					{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				else
+					{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+				fi
 			fi
+
+			${CMD_MPC} play > /dev/null 2>&1
+			_write_to_pipe "Mpd-play"
 		fi
+	fi
 
-		${CMD_SLEEP} 5
-	done
-
-	_log_log "WAV preview tracks done. Cleaning up..."
-
-	# Remove WAV files
-	${CMD_RM} -rf "${EARLY_PLAYBACK_TEMP_DIR}"
-
-	# Remove symlink
-	${CMD_RM} -f "${_G_MPD_MUSIC_DIR}/${EARLY_PLAYBACK_MPD_TAG}"
-
-	# Update MPD to remove stale entries
-	${CMD_MPC} update "${EARLY_PLAYBACK_MPD_TAG}" > /dev/null 2>&1
-
-	_EARLY_PLAYBACK_ACTIVE=0
-
-	_log_ok "Preview cleanup complete."
+	return 0
 }
 
 
@@ -1204,155 +1147,67 @@ if [ 0 -ne "${RV}" ]; then
 	_G_START_TIME=$(date +%s)
 
 	##################################################################
-	# Early playback: rip initial tracks as WAV and start playing
-	# while abcde handles the full rip+encode.
+	# Early playback: rip first N tracks with abcde, start playing,
+	# then rip remaining tracks with a second abcde run.
 	##################################################################
 
-	if [ "y" = "${EARLY_PLAYBACK}" ]; then
+	if [ "y" = "${EARLY_PLAYBACK}" ] && [ "${_G_TRACKS}" -gt 1 ]; then
 		_calculate_track_durations
 		_determine_preview_tracks
-		_setup_preview_playback
+
+		_log_log "Early playback: ripping tracks 1-${_G_PREVIEW_TRACK_COUNT} first."
+
+		# Phase 1: Rip preview tracks with abcde
+		_run_abcde_for_tracks "1-${_G_PREVIEW_TRACK_COUNT}"
+		RV=${?}
+
+		if [ "0" -ne "${RV}" ]; then
+			_log_warn "Early playback rip failed, falling back to normal mode."
+		else
+			_EARLY_PLAYBACK_ACTIVE=1
+
+			# Update MPD and add preview tracks to queue
+			${CMD_MPC} update > /dev/null 2>&1
+			${CMD_SLEEP} 3
+
+			_add_tracks_to_mpd 1
+
+			_log_ok "Early playback: ${_G_PREVIEW_TRACK_COUNT} track(s) playing."
+
+			# Phase 2: Rip remaining tracks
+			if [ "${_G_PREVIEW_TRACK_COUNT}" -lt "${_G_TRACKS}" ]; then
+				local _REMAINING_START=$((_G_PREVIEW_TRACK_COUNT + 1))
+
+				_log_log "Early playback: ripping remaining tracks ${_REMAINING_START}-${_G_TRACKS}."
+
+				_run_abcde_for_tracks "${_REMAINING_START}-${_G_TRACKS}"
+				RV=${?}
+
+				if [ "0" -eq "${RV}" ]; then
+					# Update MPD and add remaining tracks
+					${CMD_MPC} update > /dev/null 2>&1
+					${CMD_SLEEP} 3
+
+					_add_tracks_to_mpd "${_REMAINING_START}"
+				else
+					_log_error "Failed to rip remaining tracks."
+				fi
+			fi
+		fi
 	fi
 
 	##################################################################
-	# This deals with the CD ripping.
+	# Normal mode: rip all tracks at once (when early playback is
+	# disabled or not applicable).
 	##################################################################
 
-	(
+	if [ 0 -eq "${_EARLY_PLAYBACK_ACTIVE}" ]; then
+		_run_abcde_for_tracks ""
+		RV=${?}
 
-		# Wait for lock on "/var/lock/${_SCRIPTNAME}.lock" (fd 200) for two hours.
-
-		# -x  - Obtain an exclusive lock, sometimes called a write lock.
-		# -w  - Fail if the lock cannot be acquired within seconds.
-		# 200 - Uses an open file by its file descriptor number.
-		${CMD_FLOCK} -x -w 7200 200 || _log_fatal_and_exit 20 "Ripping failed. Cannot aquire the lock."
-
-		# Ensure that 'abcde' does not fail if it finds a previous unfinished rip.
-		_cleanup_abcde
-
-		# Allow 'abcde' access to these variables.
-		# Export needed things so they can be read in this subshell.
-
-		export	LOG_LEVEL_NOLOG
-		export	LOG_LEVEL_FATAL
-		export	LOG_LEVEL_ERROR
-		export	LOG_LEVEL_WARN
-		export	LOG_LEVEL_OK
-		export	LOG_LEVEL_LOG
-		export	LOG_LEVEL_DEBUG
-
-		export	_LOG_LEVEL
-		export	CDROM
-		export	RIPPED_MUSIC_OWNER	# 'pi:pi'
-		export	MUSIC_DIR		# '/var/lib/mpd/music/My CDs' or '/var/lib/mpd/music/USB/CD'.
-		export	MUSIC_SUB_DIR		# '' or 'CD'
-		export	_G_DISCID_DIR		# '/var/lib/mpd/music/My CDs/.Music CDs Ripped'
-		export	TEMP_DIR		# '/run'
-		export	LOGFILE			# '/var/log/${_SCRIPTNAME}.log'
-		export	GENRES_TO_CONVERT_FILE
-		export	_DEFAULT_CD_COVER	# '{_DIRECTORY}/default-cd-cover.jpg'
-
-		# Enable our traps for 'abcde'.
-		#
-		# Number	SIG		Meaning
-		# 0		0		On exit from shell
-		# 1		SIGHUP		Clean tidyup
-		# 2		SIGINT		Interrupt (CTRL-C)
-		# 3		SIGQUIT		Quit
-		# 6		SIGABRT		Cancel
-		# 9		SIGKILL		Die Now (cannot be trap'ped)
-		# 15		SIGTERM		Terminate
-		#
-		# If a signal is EXIT (0) the command arg is executed on exit from the shell.
-		# If a signal is ERR, the command arg is executed whenever a the command has a non-zero exit status.
-		# If a signal is RETURN, the command arg is executed each time a shell function
-		# or a script executed with the . or source builtins finishes executing.
-		trap	_abcde_exit_error	EXIT ERR SIGHUP SIGINT SIGQUIT SIGABRT SIGTERM
-
-
-#		# Info from somewhere on the web.
-#
-#		# ABCDE has a bug where it tries to rip data cd's. But the version that fixes it itself has
-#		# even more. So instead of trying to install the new version, which doesn't work, we use a command
-#		# similar to the one ABCDE uses to determine the number of valid tracks (since it assumes the data
-#		# track always occurs at the end, which in some game CD's it doesn't) and pass it to the command
-#		# line. Yes, it really is one line.
-#		local VALIDTRACKS="$(cdparanoia -d $CDROM -Q 2>&1 | egrep '^[[:space:]]+[[:digit:]]' | awk '{print $1}' | tr -d "." | tr '\n' ' ')"
-#
-##		logger -p $LOGDEST.info "Info ($PROCESS): Starting encoding."
-#
-#		abcde $VALIDTRACKS > /dev/null 2>&1
-
-
-
-		# Uses a specific config file.
-
-		# TEST: Do the ripping.
-		# Use Unix PIPES to read and encode in one step.
-		# Duration: 3:40
-		# { ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" -P 2-3 >> "${LOGFILE}"; } 2>&1
-
-		# TEST: Normal read and encode.
-		# Duration: 3:10
-		# { ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" 2-3 >> "${LOGFILE}"; } 2>&1
-
-
-
-		# Any error from the 'abcde' ripping software will result in an immediate call to '_abcde_exit_error'.
-		# This will eject the cd and clean up the 'abcde' temporary directory.
-		if [ "${LOG_LEVEL_DEBUG}" -eq "${_LOG_LEVEL}" ]; then
-			# We only rip and tag one track when in debug mode
-			# and also display the full text output of 'abcde'.
-			# Run 2 encoder jobs while it rips: -j 2 Is this the same as MAXPROCS=2 ?
-			_G_RESULT=$( { ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" 1 >> "${LOGFILE}"; } 2>&1 )
-
-			RV=$?
-
-			_log_result "${_G_RESULT}"
-		else
-			# Use the original 'abcde' version.
-			{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" >> "${LOGFILE}"; } 2>&1
-
-			RV=$?
+		if [ "0" -ne "${RV}" ]; then
+			_exit_terminate "${RV}"
 		fi
-
-
-
-		# Remove all our traps.
-		trap	-	EXIT ERR SIGHUP SIGINT SIGQUIT SIGABRT SIGTERM
-
-		# Remove the exports.
-		# export	-n	_write_to_pipe
-
-		export	-n	LOG_LEVEL_NOLOG
-		export	-n	LOG_LEVEL_FATAL
-		export	-n	LOG_LEVEL_ERROR
-		export	-n	LOG_LEVEL_WARN
-		export	-n	LOG_LEVEL_OK
-		export	-n	LOG_LEVEL_LOG
-		export	-n	LOG_LEVEL_DEBUG
-
-		export	-n	_LOG_LEVEL
-		export	-n	CDROM
-		export	-n	RIPPED_MUSIC_OWNER
-		export	-n	MUSIC_DIR
-		export	-n	MUSIC_SUB_DIR
-		export	-n	_G_DISCID_DIR
-		export	-n	TEMP_DIR
-		export	-n	LOGFILE
-		export	-n	GENRES_TO_CONVERT_FILE
-		export	-n	_DEFAULT_CD_COVER
-
-		_log_if_fatal_and_exit "${RV}" 21 "Ripping failed. 'abcde'"
-
-	) 200>"${_LOCKNAME}"
-
-	# We always come here whenever there is an ripping error or success because of the flock command.
-	RV=${?}
-
-	# If we have a fatal exit code from above.
-	if [ "0" -ne "${RV}" ]; then
-		_exit_terminate "${RV}"
 	fi
 
 
@@ -1392,10 +1247,8 @@ if [ 0 -ne "${RV}" ]; then
 
 	_write_to_pipe "Ripping-done"
 
-	# If early playback is active, transition from WAV to FLAC and clean up.
+	# If early playback handled everything, we're done.
 	if [ 1 -eq "${_EARLY_PLAYBACK_ACTIVE}" ]; then
-		_transition_to_flac
-		_cleanup_preview
 		_exit_terminate 0
 	fi
 fi	# End of 'if [ 0 -ne "${RV}" ]; then'
