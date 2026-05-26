@@ -697,10 +697,20 @@ _setup_preview_playback() {
 		return
 	fi
 
-	# Save current playlist (same logic as existing code)
-	{ ${CMD_MPC} -q rm "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
-	{ ${CMD_MPC} -q save "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
-	{ ${CMD_MPC} -q clear 2>&1; } > /dev/null
+	# Check if MPD is currently playing. If so, don't clear the queue —
+	# just append preview tracks after the current playlist.
+	local _MPD_PLAYING="n"
+	local _MPD_STATUS
+	_MPD_STATUS=$(${CMD_MPC} status 2>/dev/null)
+	if [[ "${_MPD_STATUS}" == *"[playing]"* ]]; then
+		_MPD_PLAYING="y"
+		_log_log "MPD is playing, appending preview tracks to current queue."
+	else
+		# Save and clear current playlist
+		{ ${CMD_MPC} -q rm "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
+		{ ${CMD_MPC} -q save "${DEFAULT_SAVED_USER_PLAYLIST}" 2>&1; } > /dev/null
+		{ ${CMD_MPC} -q clear 2>&1; } > /dev/null
+	fi
 
 	# Rip preview tracks with cdparanoia (no paranoia for speed)
 	for (( i=1; i<=_G_PREVIEW_TRACK_COUNT; i++ )); do
@@ -735,19 +745,22 @@ _setup_preview_playback() {
 		${CMD_MPC} -q add "${EARLY_PLAYBACK_MPD_TAG}/track${_PADDED}.wav" 2>&1
 	done
 
-	# Set volume if needed
-	local _VOL
-	_VOL=$(${CMD_MPC} volume 2>&1 | grep -o '[0-9]*')
-	if [ "${_VOL}" = "0" ]; then
-		if [ -x "${CMD_ROTVOL}" ]; then
-			{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
-		else
-			{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+	# Only start playback if not already playing
+	if [ "y" != "${_MPD_PLAYING}" ]; then
+		# Set volume if needed
+		local _VOL
+		_VOL=$(${CMD_MPC} volume 2>&1 | grep -o '[0-9]*')
+		if [ "${_VOL}" = "0" ]; then
+			if [ -x "${CMD_ROTVOL}" ]; then
+				{ ${CMD_ROTVOL} -up "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+			else
+				{ ${CMD_MPC} volume "${DEFAULT_VOLUME}" > /dev/null; } 2>&1
+			fi
 		fi
-	fi
 
-	# Start playback
-	${CMD_MPC} play > /dev/null 2>&1
+		# Start playback
+		${CMD_MPC} play > /dev/null 2>&1
+	fi
 
 	_EARLY_PLAYBACK_ACTIVE=1
 
