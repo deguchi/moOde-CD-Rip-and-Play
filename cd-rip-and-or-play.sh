@@ -709,7 +709,9 @@ _setup_preview_playback() {
 
 		_log_log "Preview ripping track ${i}/${_G_PREVIEW_TRACK_COUNT}..."
 
-		${CMD_CDPARANOIA} -Z -d "${CDROM}" "${i}" "${_WAV_FILE}" >> "${LOGFILE}" 2>&1
+		# Use -S 16 to limit speed (same as abcde) to avoid USB bus overload on Pi 3.
+		# --never-skip=40 for error recovery, same as abcde config.
+		${CMD_CDPARANOIA} --never-skip=40 -S 16 -d "${CDROM}" "${i}" "${_WAV_FILE}" >> "${LOGFILE}" 2>&1
 
 		if [ ! -f "${_WAV_FILE}" ]; then
 			_log_warn "Failed to rip preview track ${i}, falling back to normal mode."
