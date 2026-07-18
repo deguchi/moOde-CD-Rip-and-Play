@@ -1219,9 +1219,12 @@ else
 ##		_log_debug "Got: ${_L_LINE}"
 ##		_log_debug "First: ${FIRST}"
 
-		# If starts with '[' and ends with ']'.
-#		if [[ ( "${FIRST}" == [* ) && ( "${FIRST}" == *] ) ]]; then
-		if [[ ( "${FIRST}" == "[*" ) && ( "${FIRST}" == "*]" ) ]]; then
+		# If starts with '[' and ends with ']'  (e.g. "[playing]" / "[paused]").
+		# NOTE: the glob metacharacters must NOT be quoted, otherwise they are
+		# matched literally and the state line is never recognised - which left
+		# _G_MPD_STATE empty and made the rip always clear the queue and play,
+		# even while a track was playing.
+		if [[ ( "${FIRST}" == "["* ) && ( "${FIRST}" == *"]" ) ]]; then
 			_decode_state_line_state "${_L_LINE}"
 		else
 			# If starts with 'volume:'.
