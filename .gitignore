@@ -1,3 +1,4 @@
 # Generated service files (created from .service.in templates by Install-cd-rip.sh)
 cd-rip-and-or-play.service
 cd-rip-eject.service
+.DS_Store
