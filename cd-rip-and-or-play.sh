@@ -897,6 +897,17 @@ ${CMD_LS} "${_G_CD_DISC_ID}"\ -*._* 2>&1
 
 RV=${?}
 
+# Remember whether the disc was ALREADY ripped (disc-id file found) BEFORE any
+# ripping happens - RV is reused many times below. This decides the play
+# behaviour later: a disc the user inserts that is already ripped should play
+# its album now, whereas a disc we rip while music is playing is only appended
+# to the queue (so a long listening session is not interrupted).
+if [ 0 -eq "${RV}" ]; then
+	_G_ALREADY_RIPPED=1
+else
+	_G_ALREADY_RIPPED=0
+fi
+
 _log_debug "Log level ${_LOG_LEVEL}"
 _log_debug "${CDROM}"
 _log_debug "${MUSIC_DIR}                      # /var/lib/mpd/music/SDCARD/CD or /var/lib/mpd/music/My CDs"
@@ -1271,8 +1282,20 @@ else
 	# the current users playlist and clear it from the mpd queue.
 	##################################################################
 
-	# If we have not got the state line or we are not playing any tracks.
-	if [[ "playing" != "${_G_MPD_STATE}" ]]; then
+	# Append-only mode: keep the current queue and just add the album to the
+	# end, without interrupting playback. This applies ONLY when we have just
+	# ripped a new disc AND a track is currently playing. An already-ripped disc
+	# that the user just inserted always replaces the queue and plays its album,
+	# which is the whole point of inserting it.
+	if [ "${_G_ALREADY_RIPPED}" -eq 0 ] && [[ "playing" == "${_G_MPD_STATE}" ]]; then
+		_G_APPEND_ONLY=1
+	else
+		_G_APPEND_ONLY=0
+	fi
+
+	# Unless we are in append-only mode, save the current queue and clear it so
+	# the inserted/ripped album plays on its own.
+	if [ "${_G_APPEND_ONLY}" -eq 0 ]; then
 		# Saving the playlist as: Saved-User-Playlist
 		_log_log "Saving the playlist as: ${DEFAULT_SAVED_USER_PLAYLIST}"
 
@@ -1413,9 +1436,11 @@ else
 	# Mpd state:
 	_log_debug "Mpd state: ${_G_MPD_STATE}"
 
-	# If already playing a track there is no need to start playing and leave the volume alone.
-	if [ "playing" == "${_G_MPD_STATE}" ]; then
-		_log_debug "We are already playing a track. Do not change the volume."
+	# In append-only mode (new rip while a track is playing) leave playback and
+	# the volume alone - the album was just added to the end of the queue.
+	# Otherwise start playing the inserted/ripped album.
+	if [ "${_G_APPEND_ONLY}" -eq 1 ]; then
+		_log_debug "Append-only: a track is already playing. Do not interrupt or change the volume."
 
 		_write_to_pipe "Mpd-already-playing"
 	else
