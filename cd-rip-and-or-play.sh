@@ -964,6 +964,41 @@ if [ 0 -ne "${RV}" ]; then
 		export	GENRES_TO_CONVERT_FILE
 		export	_DEFAULT_CD_COVER	# '{_DIRECTORY}/default-cd-cover.jpg'
 
+		##################################################################
+		# Pre-flight CDDB/MusicBrainz lookup.
+		#
+		# 'abcde' only fills in DARTIST/DALBUM (in do_cddbedit) AFTER the
+		# 'pre_read' hook, so the config file cannot decide there whether the
+		# disc is known. Instead we run a metadata-only lookup here with
+		# '-a cddb' (reads the TOC only - no audio is ripped, takes a few
+		# seconds). When no match is found in any source, 'abcde' writes
+		# 'cddb-choice=0' to its status file. In that case we eject the disc
+		# and skip ripping so an unidentified CD is not imported as "Unknown".
+		#
+		# The looked-up data is cached in the abcde temp dir, so the real rip
+		# below reuses it instead of querying the network a second time.
+		##################################################################
+
+		_log_log "Pre-flight CDDB/MusicBrainz lookup (metadata only)..."
+
+		{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" -a cddb >> "${LOGFILE}"; } 2>&1
+
+		_G_PREFLIGHT_DIR=$(${CMD_FIND} "${TEMP_DIR}" -maxdepth 1 -type d -name 'abcde.*' -print -quit 2>/dev/null)
+
+		if [ -n "${_G_PREFLIGHT_DIR}" ] && ${CMD_GREP} -q '^cddb-choice=0$' "${_G_PREFLIGHT_DIR}/status" 2>/dev/null; then
+			_log_log ""
+			_log_log "CD not recognized by CDDB/MusicBrainz. Ejecting without ripping."
+			_log_log ""
+
+			_eject_cd
+
+			_cleanup_abcde
+
+			# Special exit code handled after this subshell: unrecognized
+			# disc was ejected, there is nothing to rip or play.
+			exit 44
+		fi
+
 		# Enable our traps for 'abcde'.
 		#
 		# Number	SIG		Meaning
@@ -1061,6 +1096,15 @@ if [ 0 -ne "${RV}" ]; then
 
 	# We always come here whenever there is an ripping error or success because of the flock command.
 	RV=${?}
+
+	# The disc could not be identified by CDDB/MusicBrainz. It was already
+	# ejected in the subshell above and nothing was ripped, so exit cleanly
+	# (do not treat this as a ripping error and do not try to play it).
+	if [ 44 -eq "${RV}" ]; then
+		_log_log "CD not recognized. Ejected without ripping."
+
+		_exit_terminate 0
+	fi
 
 	# If we have a fatal exit code from above.
 	if [ "0" -ne "${RV}" ]; then
