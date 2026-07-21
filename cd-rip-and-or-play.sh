@@ -986,19 +986,42 @@ if [ 0 -ne "${RV}" ]; then
 		# 'cddb-choice=0' to its status file. In that case we eject the disc
 		# and skip ripping so an unidentified CD is not imported as "Unknown".
 		#
-		# The looked-up data is cached in the abcde temp dir, so the real rip
-		# below reuses it instead of querying the network a second time.
+		# 'abcde' can only query ONE cddb server per run, so we try each server
+		# in ${_G_CDDB_SERVERS} in turn (via the CD_RIP_CDDBURL override that
+		# abcde.conf honours) until one recognises the disc. Each attempt also
+		# re-tries MusicBrainz and CD-Text (the other CDDBMETHOD entries), so a
+		# MusicBrainz hit stops the loop on the first pass. The matching lookup
+		# is cached in the abcde temp dir, so the real rip below reuses it
+		# instead of querying the network a second time.
 		##################################################################
 
-		_log_log "Pre-flight CDDB/MusicBrainz lookup (metadata only)..."
+		_G_PREFLIGHT_MATCHED=0
 
-		{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" -a cddb >> "${LOGFILE}"; } 2>&1
+		for _G_CDDB_URL in ${_G_CDDB_SERVERS}; do
+			_log_log "Pre-flight lookup (metadata only) via: ${_G_CDDB_URL}"
 
-		_G_PREFLIGHT_DIR=$(${CMD_FIND} "${TEMP_DIR}" -maxdepth 1 -type d -name 'abcde.*' -print -quit 2>/dev/null)
+			# Start each attempt from a clean temp dir.
+			_cleanup_abcde
 
-		if [ -n "${_G_PREFLIGHT_DIR}" ] && ${CMD_GREP} -q '^cddb-choice=0$' "${_G_PREFLIGHT_DIR}/status" 2>/dev/null; then
+			export	CD_RIP_CDDBURL="${_G_CDDB_URL}"
+
+			{ ${CMD_ABCDE} -c "${_ABCDE_CONFIG}" -a cddb >> "${LOGFILE}"; } 2>&1
+
+			_G_PREFLIGHT_DIR=$(${CMD_FIND} "${TEMP_DIR}" -maxdepth 1 -type d -name 'abcde.*' -print -quit 2>/dev/null)
+
+			# A match was found if the status file has a non-zero cddb-choice.
+			if [ -n "${_G_PREFLIGHT_DIR}" ] && ${CMD_GREP} -q '^cddb-choice=' "${_G_PREFLIGHT_DIR}/status" 2>/dev/null && ! ${CMD_GREP} -q '^cddb-choice=0$' "${_G_PREFLIGHT_DIR}/status" 2>/dev/null; then
+				_log_log "CD recognized (server: ${_G_CDDB_URL})."
+				_G_PREFLIGHT_MATCHED=1
+				break
+			fi
+		done
+
+		export	-n	CD_RIP_CDDBURL
+
+		if [ "${_G_PREFLIGHT_MATCHED}" -eq 0 ]; then
 			_log_log ""
-			_log_log "CD not recognized by CDDB/MusicBrainz. Ejecting without ripping."
+			_log_log "CD not recognized by MusicBrainz or any CDDB server. Ejecting without ripping."
 			_log_log ""
 
 			_eject_cd
