@@ -2,3 +2,6 @@
 cd-rip-and-or-play.service
 cd-rip-eject.service
 .DS_Store
+
+# Discogs personal access token used by fix-cover.sh
+.discogs-token

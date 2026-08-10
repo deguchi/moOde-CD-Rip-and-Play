@@ -486,6 +486,7 @@ echo "Checking our files exist and set the owners and file mode."
 for FILE_TO_CHECK in "${UDEV_RULE}",444 "${SYSTEMD_EJECT_SERVICE_TEMPLATE}",444 "${SYSTEMD_RIP_SERVICE_TEMPLATE}",444 \
 			"${GENRES_FILE_TO_CONVERT}",444 "abcde.conf",644 "cd-rip-and-or-play",644 \
 			"cd-rip-and-or-play.sh",544 "${CDRIP_CONFIG}",644 "cd-rip-eject.sh",544 \
+			"fix-cover.sh",544 \
 			 "Install-cd-rip.sh",544 "Remove-cd-rip.sh",544
 do
 	_FILE=${FILE_TO_CHECK%,*}
@@ -532,7 +533,7 @@ echo "Checking for the required programs."
 
 MISSING_PROGRAMS=()
 
-for CMD in "abcde" "cd-discid" "eject" "flock" "touch" "truncate" "mpc" "mpd" "cdparanoia" "lame" "flac" "mpcenc" "glyrc" "eyeD3"
+for CMD in "abcde" "cd-discid" "eject" "flock" "touch" "truncate" "mpc" "mpd" "cdparanoia" "lame" "flac" "mpcenc" "glyrc" "eyeD3" "convert"
 do
 	# Check if the command exists and is executable.
 	CMD_TO_CHECK=$(command -v "${CMD}")
@@ -542,14 +543,16 @@ do
 		# HACK - HACK - HACK - HACK - HACK - HACK
 		# 'eyeD3' is actually 'eyed3' in apt.
 		# 'mpcenc' is actually 'musepack-tools' in apt.
+		# 'convert' is actually 'imagemagick' in apt. It resizes the cover
+		# artwork for both 'abcde' (CONVERTOPTS) and 'fix-cover.sh'.
 		if [ "eyeD3" == "${CMD}" ]; then
 			MISSING_PROGRAMS+=("eyed3")
+		elif [ "mpcenc" == "${CMD}" ]; then
+			MISSING_PROGRAMS+=("musepack-tools")
+		elif [ "convert" == "${CMD}" ]; then
+			MISSING_PROGRAMS+=("imagemagick")
 		else
-			if [ "mpcenc" == "${CMD}" ]; then
-				MISSING_PROGRAMS+=("musepack-tools")
-			else
-				MISSING_PROGRAMS+=("${CMD}")
-			fi
+			MISSING_PROGRAMS+=("${CMD}")
 		fi
 	fi
 done
