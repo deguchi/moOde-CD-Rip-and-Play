@@ -527,12 +527,24 @@ install_cover() {
 ##################################################################
 
 drop_thumbnail() {
-	local dir="$1" rel hash
+	local dir="$1" root rel hash
 
 	[ -d "${THMCACHE_DIR}" ] || return 0
 
+	# Resolve both sides. During a rip the album sits under MPD's music
+	# directory ('/var/lib/mpd/music/OSDISK/...'), which is a symlink to the
+	# library root ('/mnt/OSDISK/...'); without this the prefix would not
+	# strip and the hash would be wrong.
+	dir=$(realpath "${dir}" 2> /dev/null) || return 0
+	root=$(realpath "${MUSIC_DIR}" 2> /dev/null) || return 0
+
+	case "${dir}" in
+		"${root}"/*)	;;
+		*)		return 0 ;;	# Outside the library - not ours
+	esac
+
 	# '/mnt/OSDISK/Various Artists/image 4' -> 'OSDISK/Various Artists/image 4'
-	rel="$(basename "${MUSIC_DIR}")/${dir#"${MUSIC_DIR}"/}"
+	rel="$(basename "${root}")/${dir#"${root}"/}"
 	hash=$(printf '%s' "${rel}" | md5sum | cut -d' ' -f1)
 
 	if [ -f "${THMCACHE_DIR}/${hash}.jpg" ] || [ -f "${THMCACHE_DIR}/${hash}_sm.jpg" ]; then
@@ -634,10 +646,15 @@ process_album() {
 update_library() {
 	echo ""
 	echo "Updating MPD and moOde library..."
-	mpc update > /dev/null 2>&1 || true
-	sleep 2
+	# 'clear_libcache_all' runs inline in the request, so any endpoint will do.
 	curl -s -o /dev/null "http://localhost/command/music-library.php?cmd=clear_libcache_all" || true
-	curl -s -o /dev/null "http://localhost/command/music-library.php?cmd=update_library" || true
+
+	# The update itself must go through 'dashboard.php'. It is the only entry
+	# point that resolves the real session id (session_id(phpSession(
+	# 'get_sessionid'))) before submitting the job; 'music-library.php' opens a
+	# read-only session, so a job submitted there from curl - with no session
+	# cookie - is silently dropped and the worker never runs.
+	curl -s -o /dev/null "http://localhost/command/dashboard.php?cmd=update_library" || true
 }
 
 ##################################################################
@@ -702,6 +719,12 @@ if [ -n "${OPT_FETCH}" ]; then
 	fi
 
 	echo "fix-cover: artwork for '${OPT_ALBUM}' from $(cut -d'|' -f1 <<< "${_TOP}") -> ${OPT_FETCH}"
+
+	# A rip creates the album folder well before this runs, so moOde has often
+	# already cached a placeholder thumbnail for it. thumb-gen only fills in
+	# MISSING thumbnails, so without dropping it the freshly fetched cover
+	# would never reach the WebUI.
+	drop_thumbnail "$(dirname "$(realpath "${OPT_FETCH}" 2> /dev/null || echo "${OPT_FETCH}")")"
 	exit 0
 fi
 
