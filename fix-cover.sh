@@ -13,6 +13,11 @@
 # a 'cover.jpg' in the album folder plus an embedded FRONT_COVER picture block
 # in every FLAC.
 #
+# Imported albums count too, not just ripped ones. Any folder holding audio in
+# a supported format is considered (see AUDIO_EXTS - flac, dsf, dff, m4a, mp3,
+# wav, aiff). Only FLAC gets the embedded picture; everything else just gets
+# the folder 'cover.jpg', which is all moOde needs to display a cover.
+#
 # NOTE ON CDDB: gnudb/CDDB itself carries no artwork - it only returns track
 # metadata - so adding another CDDB server cannot fix a missing cover. What
 # helps is adding artwork sources, which is what SOURCES below does.
@@ -45,7 +50,7 @@
 #   --all           Walk every album that has no artwork
 #   --auto          Take the best candidate instead of prompting
 #   --query "..."   Override the search terms for a single album
-#   --no-embed      Only write 'cover.jpg', leave the FLAC tags alone
+#   --no-embed      Only write 'cover.jpg', never touch the FLAC tags
 #   --no-refresh    Do not rebuild the moOde library afterwards
 #   --force         Also process albums that already have artwork
 #   --dry-run       Show what would happen, change nothing
@@ -100,6 +105,23 @@ if [ -z "${DISCOGS_TOKEN}" ]; then
 	done
 fi
 
+# Formats to look at. Only FLAC can carry an embedded picture that this script
+# knows how to write, but moOde displays a folder 'cover.jpg' for every format,
+# so DSD and lossy albums are worth covering too. Tags for anything that is not
+# FLAC are read with 'ffprobe'; without it the script stays FLAC-only rather
+# than reporting albums it cannot describe.
+AUDIO_EXTS="flac dsf dff m4a mp3 wav aiff"
+if ! command -v ffprobe > /dev/null 2>&1; then
+	AUDIO_EXTS="flac"
+fi
+
+# find(1) predicate matching any of the above, built once.
+AUDIO_FIND_EXPR=()
+for _ext in ${AUDIO_EXTS}; do
+	[ "${#AUDIO_FIND_EXPR[@]}" -gt 0 ] && AUDIO_FIND_EXPR+=( -o )
+	AUDIO_FIND_EXPR+=( -iname "*.${_ext}" )
+done
+
 WORKDIR=$(mktemp -d)
 trap 'rm -rf "${WORKDIR}"' EXIT
 
@@ -136,12 +158,48 @@ urlencode() {
 	python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$1"
 }
 
-# Read one Vorbis comment from the first FLAC of an album folder.
+# List the audio files directly inside an album folder. Extra find(1) arguments
+# (-print0, -quit, -printf ...) are appended by the caller.
+find_audio() {
+	local dir="$1"
+	shift
+	find "${dir}" -maxdepth 1 -type f \( "${AUDIO_FIND_EXPR[@]}" \) "$@"
+}
+
+# Read one tag from the first audio file of an album folder.
 album_tag() {
-	local dir="$1" tag="$2" file
-	file=$(find "${dir}" -maxdepth 1 -name '*.flac' -print -quit)
+	local dir="$1" tag="$2" file ftag
+	file=$(find_audio "${dir}" -print -quit)
 	[ -z "${file}" ] && return 0
-	metaflac --show-tag="${tag}" "${file}" 2>/dev/null | head -1 | cut -d= -f2-
+
+	case "${file,,}" in
+		*.flac)
+			metaflac --show-tag="${tag}" "${file}" 2> /dev/null | head -1 | cut -d= -f2-
+			;;
+		*)
+			# ffprobe reports lower case tag names, and spells the album
+			# artist 'album_artist' rather than 'ALBUMARTIST'.
+			ftag="${tag,,}"
+			[ "${ftag}" = "albumartist" ] && ftag="album_artist"
+			ffprobe -v quiet -show_entries "format_tags=${ftag}" \
+				-of default=nw=1:nk=1 "${file}" 2> /dev/null | head -1
+			;;
+	esac
+}
+
+# Does this single file carry embedded artwork?
+file_has_picture() {
+	local file="$1"
+	case "${file,,}" in
+		*.flac)
+			metaflac --list --block-type=PICTURE "${file}" 2> /dev/null | grep -q 'PICTURE'
+			;;
+		*)
+			# Embedded art shows up as a video stream (an attached picture).
+			[ -n "$(ffprobe -v quiet -select_streams v -show_entries stream=codec_name \
+				-of csv=p=0 "${file}" 2> /dev/null)" ]
+			;;
+	esac
 }
 
 # An album counts as having artwork if a cover file sits next to the tracks -
@@ -150,14 +208,19 @@ album_tag() {
 # into only some tracks, which shows up as a half-covered album in moOde.
 album_has_art() {
 	local dir="$1" file
-	for name in Cover.jpg cover.jpg Cover.jpeg cover.jpeg Cover.png cover.png \
-		Folder.jpg folder.jpg Folder.jpeg folder.jpeg Folder.png folder.png; do
-		[ -f "${dir}/${name}" ] && return 0
-	done
-	[ -n "$(find "${dir}" -maxdepth 1 -name '*.flac' -print -quit)" ] || return 1
+
+	# Match what moOde actually displays. parseDir() prefers cover.*/folder.*
+	# but then falls back to globbing ANY image in the folder, so albums whose
+	# jacket is called 'front.jpg' or 'something (2).jpg' are already fine and
+	# must not be reported as missing.
+	if [ -n "$(find "${dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' \
+		-o -iname '*.png' -o -iname '*.tif' -o -iname '*.tiff' \) -print -quit)" ]; then
+		return 0
+	fi
+	[ -n "$(find_audio "${dir}" -print -quit)" ] || return 1
 	while IFS= read -r -d '' file; do
-		metaflac --list --block-type=PICTURE "${file}" 2> /dev/null | grep -q 'PICTURE' || return 1
-	done < <(find "${dir}" -maxdepth 1 -name '*.flac' -print0)
+		file_has_picture "${file}" || return 1
+	done < <(find_audio "${dir}" -print0)
 	return 0
 }
 
@@ -166,7 +229,7 @@ list_album_dirs() {
 	# that is still running and '.Music CDs Ripped' the disc-id playlists.
 	# Neither is an album, and writing into a live rip would corrupt it.
 	find "${MUSIC_DIR}" -type d -name '.*' -prune -o \
-		-type f -name '*.flac' -printf '%h\n' 2> /dev/null | sort -u
+		-type f \( "${AUDIO_FIND_EXPR[@]}" \) -printf '%h\n' 2> /dev/null | sort -u
 }
 
 ##################################################################
@@ -400,13 +463,13 @@ fetch_image() {
 ##################################################################
 
 install_cover() {
-	local dir="$1" newcover="$2" owner target count=0
+	local dir="$1" newcover="$2" owner target embedded=0 untouched=0
 
 	target="${dir}/${ALBUMARTFILE}"
 
 	# Ripped files belong to the account that ran the rip and are chmod 444;
 	# match that so the new artwork is indistinguishable from a normal rip.
-	owner=$(find "${dir}" -maxdepth 1 -name '*.flac' -printf '%u:%g\n' -quit)
+	owner=$(find_audio "${dir}" -printf '%u:%g\n' -quit)
 	owner="${owner:-root:root}"
 
 	if [ "${OPT_DRYRUN}" -eq 1 ]; then
@@ -424,6 +487,15 @@ install_cover() {
 	fi
 
 	while IFS= read -r -d '' file; do
+		# Only FLAC gets an embedded picture. Rewriting DSF or M4A metadata is
+		# a different job for each format and risks the audio payload, and
+		# moOde reads the folder cover for them anyway - so they are left
+		# exactly as they are.
+		case "${file,,}" in
+			*.flac) ;;
+			*)	untouched=$((untouched + 1)); continue ;;
+		esac
+
 		echo "  Embedding: $(basename "${file}")"
 		chmod u+w "${file}"
 		# Drop any stale picture block first, otherwise metaflac appends a
@@ -432,10 +504,13 @@ install_cover() {
 		metaflac --import-picture-from="3||||${target}" "${file}" \
 			|| echo "  WARNING: could not embed into $(basename "${file}")" >&2
 		chmod 444 "${file}"
-		count=$((count + 1))
-	done < <(find "${dir}" -maxdepth 1 -name '*.flac' -print0 | sort -z)
+		embedded=$((embedded + 1))
+	done < <(find_audio "${dir}" -print0 | sort -z)
 
-	echo "  Embedded into ${count} file(s)."
+	[ "${embedded}" -gt 0 ] && echo "  Embedded into ${embedded} file(s)."
+	[ "${untouched}" -gt 0 ] && \
+		echo "  ${untouched} non-FLAC file(s) left untouched - moOde reads '${ALBUMARTFILE}' from the folder."
+	return 0
 }
 
 ##################################################################
@@ -626,8 +701,8 @@ if [ "${OPT_ALL}" -eq 1 ]; then
 	done < <(list_album_dirs)
 elif [ -n "${ALBUM_DIR}" ]; then
 	[ -d "${ALBUM_DIR}" ] || die "album folder not found: ${ALBUM_DIR}"
-	[ -n "$(find "${ALBUM_DIR}" -maxdepth 1 -name '*.flac' -print -quit)" ] \
-		|| die "no FLAC files in: ${ALBUM_DIR}"
+	[ -n "$(find_audio "${ALBUM_DIR}" -print -quit)" ] \
+		|| die "no audio files (${AUDIO_EXTS// /, }) in: ${ALBUM_DIR}"
 	if [ "${OPT_FORCE}" -eq 0 ] && [ -z "${IMAGE_SRC}" ] && album_has_art "${ALBUM_DIR}"; then
 		echo "${ALBUM_DIR} already has artwork - use --force to replace it."
 		exit 0
