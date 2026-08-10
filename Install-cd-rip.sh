@@ -533,7 +533,7 @@ echo "Checking for the required programs."
 
 MISSING_PROGRAMS=()
 
-for CMD in "abcde" "cd-discid" "eject" "flock" "touch" "truncate" "mpc" "mpd" "cdparanoia" "lame" "flac" "mpcenc" "glyrc" "eyeD3" "convert"
+for CMD in "abcde" "cd-discid" "eject" "flock" "touch" "truncate" "mpc" "mpd" "cdparanoia" "lame" "flac" "mpcenc" "glyrc" "eyeD3" "convert" "ffprobe"
 do
 	# Check if the command exists and is executable.
 	CMD_TO_CHECK=$(command -v "${CMD}")

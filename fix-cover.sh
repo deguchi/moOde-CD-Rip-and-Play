@@ -87,6 +87,7 @@ fi
 MUSIC_DIR="${MUSIC_DIR_OVERRIDE:-${MUSIC_DIR}}"
 
 readonly	ALBUMARTFILE="cover.jpg"
+readonly	THMCACHE_DIR="/var/local/www/imagesw/thmcache"	# moOde's thumbnail cache
 readonly	CONVERTOPTS="-resize 600x600>"		# Same geometry the rip uses
 readonly	ITUNES_COUNTRY="JP"
 readonly	USER_AGENT="caliljp-fix-cover/1.0 ( https://github.com/ )"
@@ -510,7 +511,34 @@ install_cover() {
 	[ "${embedded}" -gt 0 ] && echo "  Embedded into ${embedded} file(s)."
 	[ "${untouched}" -gt 0 ] && \
 		echo "  ${untouched} non-FLAC file(s) left untouched - moOde reads '${ALBUMARTFILE}' from the folder."
+
+	drop_thumbnail "${dir}"
 	return 0
+}
+
+##################################################################
+# Invalidate this album's cached thumbnail
+#
+# moOde names each thumbnail after md5() of the album's MPD-relative folder
+# path and only generates one when the file is MISSING (thumb-gen.php). An
+# album that was cached with the placeholder therefore keeps showing the
+# placeholder forever, however good the new cover is. Deleting the two cache
+# entries makes the thumb-gen run triggered by update_library rebuild them.
+##################################################################
+
+drop_thumbnail() {
+	local dir="$1" rel hash
+
+	[ -d "${THMCACHE_DIR}" ] || return 0
+
+	# '/mnt/OSDISK/Various Artists/image 4' -> 'OSDISK/Various Artists/image 4'
+	rel="$(basename "${MUSIC_DIR}")/${dir#"${MUSIC_DIR}"/}"
+	hash=$(printf '%s' "${rel}" | md5sum | cut -d' ' -f1)
+
+	if [ -f "${THMCACHE_DIR}/${hash}.jpg" ] || [ -f "${THMCACHE_DIR}/${hash}_sm.jpg" ]; then
+		rm -f "${THMCACHE_DIR}/${hash}.jpg" "${THMCACHE_DIR}/${hash}_sm.jpg"
+		echo "  Dropped the stale thumbnail so moOde regenerates it."
+	fi
 }
 
 ##################################################################

@@ -42,7 +42,7 @@ Required programs (installed automatically):
 
 - abcde, cd-discid, cdparanoia
 - lame, flac, mpcenc
-- glyrc, eyeD3, imagemagick
+- glyrc, eyeD3, imagemagick, ffmpeg
 - eject, flock, touch, truncate, mpc, mpd
 
 ## Uninstalling
@@ -139,7 +139,23 @@ sudo ./fix-cover.sh "/mnt/OSDISK/Various Artists/image 4" https://example.com/ja
 
 Candidates are listed with their source, title, artist, year and URL. Open the URL to check the image, then enter its number — or `u` to type a different URL, or `s` to skip. When no source has the disc, search links for Google Images, Amazon and Discogs are printed so the jacket can be found by hand and passed back in.
 
-An album counts as having artwork when a cover file sits next to the tracks, or when *every* track carries an embedded picture — so albums where only some tracks got the cover are picked up too.
+Imported albums are handled too, not only ripped ones. Any folder containing `flac`, `dsf`, `dff`, `m4a`, `mp3`, `wav` or `aiff` is considered; tags are read with `metaflac` for FLAC and `ffprobe` for everything else. **Only FLAC gets an embedded picture** — DSD and lossy files are left byte-for-byte untouched and rely on the folder `cover.jpg`, which is all moOde needs to display a cover.
+
+An album counts as having artwork when the folder contains *any* image file (moOde's `parseDir()` prefers `cover.*`/`folder.*` but falls back to globbing any `jpg`/`png`/`tif`), or when *every* track carries an embedded picture — so albums where only some tracks got the cover are picked up too.
+
+### If a new cover does not appear in the WebUI
+
+moOde names each cached thumbnail after `md5()` of the album's folder path and, in `thumb-gen.php`, only generates one when that file is **missing**:
+
+```php
+if (!file_exists(THMCACHE_DIR . md5($dirA) . '.jpg'))
+```
+
+So an album cached with the placeholder keeps showing the placeholder no matter how good the new cover is — `update_library` will not replace it. `fix-cover.sh` deletes the two affected cache entries whenever it assigns artwork, so this resolves itself. To rebuild every thumbnail by hand, use *Configure → Library → Regenerate thumbnail cache*, or:
+
+```shell
+curl -s "http://localhost/command/dashboard.php?cmd=regen_thmcache"
+```
 
 | Option | Description |
 | --- | --- |
