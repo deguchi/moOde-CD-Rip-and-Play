@@ -84,6 +84,10 @@ readonly	_DEFAULT_CD_COVER="${_DIRECTORY}/default-cd-cover.jpg"
 # calls this from post_encode() when a rip produced no cover.
 readonly	_FIX_COVER="${_DIRECTORY}/fix-cover.sh"
 
+# Adds ReplayGain tags to FLAC albums. 'abcde.conf' calls this from
+# post_encode() once an album has been renamed and tagged.
+readonly	_FIX_REPLAYGAIN="${_DIRECTORY}/fix-replaygain.sh"
+
 # The 'abcde.conf' file should be in the same directory as this cd ripping program.
 readonly	_ABCDE_CONFIG="${_DIRECTORY}/abcde.conf"
 
@@ -979,6 +983,7 @@ if [ 0 -ne "${RV}" ]; then
 		export	GENRES_TO_CONVERT_FILE
 		export	_DEFAULT_CD_COVER	# '{_DIRECTORY}/default-cd-cover.jpg'
 		export	_FIX_COVER		# '{_DIRECTORY}/fix-cover.sh'
+		export	_FIX_REPLAYGAIN		# '{_DIRECTORY}/fix-replaygain.sh'
 
 		##################################################################
 		# Pre-flight CDDB/MusicBrainz lookup.
@@ -1129,6 +1134,7 @@ if [ 0 -ne "${RV}" ]; then
 		export	-n	GENRES_TO_CONVERT_FILE
 		export	-n	_DEFAULT_CD_COVER
 		export	-n	_FIX_COVER
+		export	-n	_FIX_REPLAYGAIN
 
 		_log_if_fatal_and_exit "${RV}" 21 "Ripping failed. 'abcde'"
 

@@ -486,7 +486,7 @@ echo "Checking our files exist and set the owners and file mode."
 for FILE_TO_CHECK in "${UDEV_RULE}",444 "${SYSTEMD_EJECT_SERVICE_TEMPLATE}",444 "${SYSTEMD_RIP_SERVICE_TEMPLATE}",444 \
 			"${GENRES_FILE_TO_CONVERT}",444 "abcde.conf",644 "cd-rip-and-or-play",644 \
 			"cd-rip-and-or-play.sh",544 "${CDRIP_CONFIG}",644 "cd-rip-eject.sh",544 \
-			"fix-cover.sh",544 \
+			"fix-cover.sh",544 "fix-replaygain.sh",544 \
 			 "Install-cd-rip.sh",544 "Remove-cd-rip.sh",544
 do
 	_FILE=${FILE_TO_CHECK%,*}

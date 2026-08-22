@@ -170,6 +170,50 @@ curl -s "http://localhost/command/dashboard.php?cmd=regen_thmcache"
 
 Ripped tracks are chmod 444, so the script makes each file writable, embeds the picture and restores the read-only mode. The new `cover.jpg` is given the same mode and owner as the tracks it sits with. Afterwards the moOde library cache is cleared and rebuilt, which is what makes the new artwork show up in the WebUI.
 
+## Volume normalization (FLAC only)
+
+Ripped CDs and DSD/SACD transfers sit at very different levels, so playback volume jumps between albums. MPD offers two unrelated ways to even this out, and only one of them can be limited to a single format:
+
+| Setting | Applies to | Can be limited per format? |
+| --- | --- | --- |
+| `volume_normalization` | A dynamic compressor on everything reaching the output as PCM | **No.** It would process DSD too, which means converting DSD to PCM and losing the bit-perfect path. Leave it `no`. |
+| `replaygain` | Tag driven, per file. A file with no ReplayGain tags plays completely unmodified | **Yes, implicitly** — tag the files you want normalized |
+
+So "normalize FLAC but leave DSD alone" needs no format switch anywhere. Tag the FLAC files, leave the DSF/M4A files untagged, and DSD stays bit-perfect. `fix-replaygain.sh` refuses to look at anything that is not FLAC, precisely so this stays true.
+
+Set moOde's *Configure → Audio → ReplayGain* to something other than `off`. `auto` uses album gain for album playback and track gain otherwise.
+
+### During a rip
+
+`abcde.conf` calls `fix-replaygain.sh` from `post_encode()` once the album has been renamed and tagged, so newly ripped albums are tagged automatically.
+
+Note that adding `replaygain` to `ACTIONS` does **not** work with this configuration: `abcde` runs `do_replaygain` *before* `post_encode` and against the pre-rename paths, and `post_encode` then tags each file with `metaflac --remove-all-tags` — which would wipe the gains moments after computing them.
+
+### Albums that were already ripped
+
+```shell
+# List FLAC albums with no ReplayGain tags
+./fix-replaygain.sh --scan
+
+# Tag all of them
+sudo ./fix-replaygain.sh --all
+
+# One album
+sudo ./fix-replaygain.sh "/mnt/OSDISK/Fujiko Hemming/La Campanella"
+```
+
+| Option | Description |
+| --- | --- |
+| `--scan` | List FLAC albums with no ReplayGain tags and exit |
+| `--all` | Tag every FLAC album that has none |
+| `--force` | Recalculate albums that already carry tags |
+| `--no-refresh` | Do not update the moOde library afterwards |
+| `--dry-run` | Show what would happen, change nothing |
+
+Every track of an album is passed to `metaflac` in a single call, which is what makes `REPLAYGAIN_ALBUM_GAIN` correct. An album whose tracks have differing sample rates is skipped with a warning, because `--add-replay-gain` rejects such a set — split those discs into separate folders. Files are made writable for the rewrite and put back to 444 afterwards, and `--preserve-modtime` keeps moOde from treating every track as changed.
+
+The audio is never re-encoded; only tags are added. To undo, `metaflac --remove-replay-gain` on the files.
+
 ## Default CD cover
 
 `default-cd-cover.jpg` comes from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:CD_icon_test.svg) under the [GNU Free Documentation License v1.2](https://commons.wikimedia.org/wiki/Commons:GNU_Free_Documentation_License,_version_1.2). No changes were made.
@@ -186,6 +230,7 @@ The original project was built for moOde v6.5.0 on Raspberry Pi 3. Since then, m
 - **WebUI library update**: After ripping, the moOde WebUI library update is triggered automatically via the `music-library.php` API, so new albums and cover art appear without manual intervention.
 - **Library cache handling**: The `libcache.json` truncation is guarded with a file existence check, as this file no longer exists on moOde 10.
 - **Service file templates**: Systemd service files use `.service.in` templates to prevent `git pull` from overwriting configured paths.
+- **Volume normalization**: `fix-replaygain.sh` adds ReplayGain tags to FLAC albums, automatically after each rip and retroactively for the existing library. FLAC only by design, so DSD keeps its bit-perfect path. See [Volume normalization](#volume-normalization-flac-only).
 - **Album artwork**: `abcde` only reaches CoverArtArchive when a MusicBrainz id was found, so CDDB-identified discs frequently ended up with the placeholder cover. `fix-cover.sh` adds the iTunes and Discogs catalogues, is called automatically when a rip finds no cover, and can assign artwork to albums that were ripped earlier. See [Album artwork](#album-artwork).
 
 ## License
