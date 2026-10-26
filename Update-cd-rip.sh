@@ -677,16 +677,33 @@ echo "Changing the owner of the updated files."
 for _FILE in *; do
 	# If the file exists and is a regular file, as opposed to a directory, a device special file or a link.
 	if [[ -f "${_FILE}" ]]; then
-		# Leave the logrotate file as root.
-		if [[ "${CD_RIP_AND_OR_PLAY}" != "${_FILE}" ]]; then
-			echo "Changing owner of: ${_FILE}"
+		echo "Changing owner of: ${_FILE}"
 
-			chown "${RIPPED_MUSIC_OWNER}" "${_FILE}"
+		chown "${RIPPED_MUSIC_OWNER}" "${_FILE}"
 
-			_check_command_and_exit_if_error "${?}" 25 "Cannot change the owner of file: ${_FILE}"
-		fi
+		_check_command_and_exit_if_error "${?}" 25 "Cannot change the owner of file: ${_FILE}"
 	fi
 done
+
+_display_ok
+
+
+
+##################################################################
+# Refresh the log rotate entry.
+#
+# logrotate only reads config files owned by root, so it gets a root owned
+# copy rather than a link to the file above. This also replaces the link that
+# earlier versions installed.
+##################################################################
+
+echo "Installing logrotate file: /etc/logrotate.d/${CD_RIP_AND_OR_PLAY}"
+
+rm -f "/etc/logrotate.d/${CD_RIP_AND_OR_PLAY}"
+
+install -o root -g root -m 644 "${CD_RIP_AND_OR_PLAY}" "/etc/logrotate.d/${CD_RIP_AND_OR_PLAY}"
+
+_check_command_and_exit_if_error "${?}" 27 "Cannot install logrotate file: /etc/logrotate.d/${CD_RIP_AND_OR_PLAY}"
 
 _display_ok
 

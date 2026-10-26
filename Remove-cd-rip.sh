@@ -593,16 +593,16 @@ _display_ok
 
 echo "Checking for installed logrotate file."
 
-# If the file exists and is a symbolic link.
-if [[ -L "${LOGROTATE_FILE}" ]]; then
-	echo "Removing logrotate link: '${LOGROTATE_FILE}'"
+# A copy of the file, or a link from earlier versions.
+if [[ -e "${LOGROTATE_FILE}" || -L "${LOGROTATE_FILE}" ]]; then
+	echo "Removing logrotate file: '${LOGROTATE_FILE}'"
 
 	# /etc/logrotate.d/cd-rip-and-or-play
 	rm -f "${LOGROTATE_FILE}"
 
-	_check_command_and_exit_if_error "${?}" 19 "Cannot remove logrotate link: ${LOGROTATE_FILE}"
+	_check_command_and_exit_if_error "${?}" 19 "Cannot remove logrotate file: ${LOGROTATE_FILE}"
 else
-	echo "No logrotate link found to remove: '${LOGROTATE_FILE}'"
+	echo "No logrotate file found to remove: '${LOGROTATE_FILE}'"
 fi
 
 _display_ok

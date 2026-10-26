@@ -907,24 +907,18 @@ _cd_func "/etc/logrotate.d"
 
 _check_command_and_exit_if_error "${?}" 40 "Cannot change directory to: /etc/logrotate.d"
 
-# If the file exists and is a symbolic link.
-if [[ -L "${CD_RIP_AND_OR_PLAY}" ]]; then
-	echo "Logrotate link already exists to: ${DIRECTORY}/${CD_RIP_AND_OR_PLAY}"
-else
-	echo "Creating logrotate link to: '${DIRECTORY}/${CD_RIP_AND_OR_PLAY}'"
+# Install a copy owned by root rather than a link. logrotate ignores a config
+# file whose owner is not root, and the file in this directory ends up owned
+# by the user whenever a git pull or an update rewrites it - logrotate then
+# failed every night.
+echo "Installing logrotate file from: '${DIRECTORY}/${CD_RIP_AND_OR_PLAY}'"
 
-	ln -s "${DIRECTORY}/${CD_RIP_AND_OR_PLAY}" "."
+# Earlier versions installed a link here.
+rm -f "${CD_RIP_AND_OR_PLAY}"
 
-	_check_command_and_exit_if_error "${?}" 41 "Cannot create udev rule link to: ${DIRECTORY}/${CD_RIP_AND_OR_PLAY}"
+install -o root -g root -m 644 "${DIRECTORY}/${CD_RIP_AND_OR_PLAY}" "${CD_RIP_AND_OR_PLAY}"
 
-	chown "root:root" "${CD_RIP_AND_OR_PLAY}"
-
-	_check_command_and_exit_if_error "${?}" 42 "Cannot change owner of file: ${CD_RIP_AND_OR_PLAY}"
-
-	chmod 644 "${CD_RIP_AND_OR_PLAY}"
-
-	_check_command_and_exit_if_error "${?}" 43 "Cannot change file mode of: ${CD_RIP_AND_OR_PLAY} to: 644"
-fi
+_check_command_and_exit_if_error "${?}" 41 "Cannot install logrotate file from: ${DIRECTORY}/${CD_RIP_AND_OR_PLAY}"
 
 _display_ok
 
