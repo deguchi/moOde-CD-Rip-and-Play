@@ -5,3 +5,6 @@ cd-rip-eject.service
 
 # Discogs personal access token used by fix-cover.sh
 .discogs-token
+
+# Local additions kept out of the repository
+local/
