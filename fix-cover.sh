@@ -53,6 +53,8 @@
 #   --no-embed      Only write 'cover.jpg', never touch the FLAC tags
 #   --no-refresh    Do not rebuild the moOde library afterwards
 #   --force         Also process albums that already have artwork
+#   --clear         Remove this album's artwork instead of assigning any.
+#                   Needs an explicit album folder - it will not run on --all.
 #   --dry-run       Show what would happen, change nothing
 #
 # Rip-time use:
@@ -132,6 +134,7 @@ OPT_AUTO=0
 OPT_NOEMBED=0
 OPT_NOREFRESH=0
 OPT_FORCE=0
+OPT_CLEAR=0
 OPT_DRYRUN=0
 OPT_QUERY=""
 OPT_FETCH=""
@@ -517,6 +520,71 @@ install_cover() {
 }
 
 ##################################################################
+# Remove an album's artwork
+#
+# A wrong cover lives in three places, and deleting 'cover.jpg' only clears
+# one of them:
+#
+#   1. cover.jpg in the album folder
+#   2. an embedded PICTURE block in every FLAC - and moOde's thumb-gen reads
+#      the embedded picture FIRST when its priority is "Embedded cover", so
+#      this alone keeps the wrong image on screen
+#   3. moOde's cached thumbnail, which is only regenerated when missing
+#
+# Only 'cover.jpg' is deleted - the name this script writes. Any other image
+# the user put there by hand is left alone and reported, because moOde falls
+# back to globbing any image in the folder.
+##################################################################
+
+clear_artwork() {
+	local dir="$1" file target others stripped=0
+
+	target="${dir}/${ALBUMARTFILE}"
+
+	echo ""
+	echo "=== ${dir}"
+
+	if [ "${OPT_DRYRUN}" -eq 1 ]; then
+		[ -f "${target}" ] && echo "  [dry-run] would delete ${ALBUMARTFILE}"
+		echo "  [dry-run] would strip the embedded picture from every FLAC"
+		echo "  [dry-run] would drop the cached thumbnail"
+		return 0
+	fi
+
+	if [ -f "${target}" ]; then
+		rm -f "${target}" && echo "  Deleted ${ALBUMARTFILE}"
+	else
+		echo "  No ${ALBUMARTFILE} to delete"
+	fi
+
+	while IFS= read -r -d '' file; do
+		case "${file,,}" in
+			*.flac) ;;
+			*)	continue ;;
+		esac
+		file_has_picture "${file}" || continue
+		chmod u+w "${file}" || die "cannot write ${file} - run this script with sudo"
+		metaflac --remove --block-type=PICTURE "${file}" 2> /dev/null \
+			|| echo "  WARNING: could not strip $(basename "${file}")" >&2
+		chmod 444 "${file}"
+		stripped=$((stripped + 1))
+	done < <(find_audio "${dir}" -print0 | sort -z)
+
+	echo "  Stripped the embedded picture from ${stripped} FLAC file(s)."
+
+	# Warn about hand-placed images, which would still be displayed.
+	others=$(find "${dir}" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' \
+		-o -iname '*.png' -o -iname '*.tif' -o -iname '*.tiff' \) -printf '%f\n' 2> /dev/null)
+	if [ -n "${others}" ]; then
+		echo "  NOTE: other image file(s) remain and moOde will still show one:"
+		sed 's/^/    /' <<< "${others}"
+	fi
+
+	drop_thumbnail "${dir}"
+	TOUCHED=$((TOUCHED + 1))
+}
+
+##################################################################
 # Invalidate this album's cached thumbnail
 #
 # moOde names each thumbnail after md5() of the album's MPD-relative folder
@@ -669,6 +737,7 @@ while [ $# -gt 0 ]; do
 		--no-embed)	OPT_NOEMBED=1 ;;
 		--no-refresh)	OPT_NOREFRESH=1 ;;
 		--force)	OPT_FORCE=1 ;;
+		--clear)	OPT_CLEAR=1 ;;
 		--dry-run)	OPT_DRYRUN=1 ;;
 		--query)	shift; OPT_QUERY="${1:-}" ;;
 		--fetch)	shift; OPT_FETCH="${1:-}" ;;
@@ -742,6 +811,14 @@ if [ "${OPT_SCAN}" -eq 1 ]; then
 	exit 0
 fi
 
+if [ "${OPT_CLEAR}" -eq 1 ]; then
+	# Deliberately not combinable with --all: stripping artwork library-wide
+	# is never what someone means, and it is not cheaply reversible.
+	[ "${OPT_ALL}" -eq 1 ] && die "--clear cannot be combined with --all - name one album folder"
+	[ -n "${ALBUM_DIR}" ] || die "--clear needs an album folder"
+	[ -n "${IMAGE_SRC}" ] && die "--clear takes no image argument"
+fi
+
 if [ "${OPT_ALL}" -eq 1 ]; then
 	[ -n "${ALBUM_DIR}" ] && die "--all takes no album folder"
 	while IFS= read -r dir; do
@@ -754,11 +831,15 @@ elif [ -n "${ALBUM_DIR}" ]; then
 	[ -d "${ALBUM_DIR}" ] || die "album folder not found: ${ALBUM_DIR}"
 	[ -n "$(find_audio "${ALBUM_DIR}" -print -quit)" ] \
 		|| die "no audio files (${AUDIO_EXTS// /, }) in: ${ALBUM_DIR}"
-	if [ "${OPT_FORCE}" -eq 0 ] && [ -z "${IMAGE_SRC}" ] && album_has_art "${ALBUM_DIR}"; then
-		echo "${ALBUM_DIR} already has artwork - use --force to replace it."
-		exit 0
+	if [ "${OPT_CLEAR}" -eq 1 ]; then
+		clear_artwork "${ALBUM_DIR}"
+	else
+		if [ "${OPT_FORCE}" -eq 0 ] && [ -z "${IMAGE_SRC}" ] && album_has_art "${ALBUM_DIR}"; then
+			echo "${ALBUM_DIR} already has artwork - use --force to replace it."
+			exit 0
+		fi
+		process_album "${ALBUM_DIR}"
 	fi
-	process_album "${ALBUM_DIR}"
 else
 	usage
 fi

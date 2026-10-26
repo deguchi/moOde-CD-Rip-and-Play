@@ -143,6 +143,26 @@ Imported albums are handled too, not only ripped ones. Any folder containing `fl
 
 An album counts as having artwork when the folder contains *any* image file (moOde's `parseDir()` prefers `cover.*`/`folder.*` but falls back to globbing any `jpg`/`png`/`tif`), or when *every* track carries an embedded picture — so albums where only some tracks got the cover are picked up too.
 
+### Replacing or removing a wrong cover
+
+Deleting `cover.jpg` is **not** enough. A cover lives in three places:
+
+1. `cover.jpg` in the album folder
+2. An embedded `PICTURE` block in every FLAC
+3. moOde's cached thumbnail
+
+and moOde reads the **embedded picture first** when *Configure → Library → Thumbnail priority* is `Embedded cover` — see `createThumb()` in `thumb-gen.php`. So removing only the file leaves the wrong image on screen.
+
+```shell
+# Replace it (handles all three places)
+sudo ./fix-cover.sh --force "/mnt/OSDISK/<album>" https://example.com/right.jpg
+
+# Remove it, so the album shows up in --scan again for another attempt
+sudo ./fix-cover.sh --clear "/mnt/OSDISK/<album>"
+```
+
+`--clear` deletes `cover.jpg`, strips the embedded picture from every FLAC, and drops the cached thumbnail. It refuses to run with `--all`, and only deletes `cover.jpg` — any image you placed there by hand is left alone and reported, since moOde falls back to globbing any image in the folder.
+
 ### If a new cover does not appear in the WebUI
 
 moOde names each cached thumbnail after `md5()` of the album's folder path and, in `thumb-gen.php`, only generates one when that file is **missing**:
@@ -166,6 +186,7 @@ curl -s "http://localhost/command/dashboard.php?cmd=regen_thmcache"
 | `--no-embed` | Only write `cover.jpg`, leave the FLAC tags alone |
 | `--no-refresh` | Do not rebuild the moOde library afterwards |
 | `--force` | Also process albums that already have artwork |
+| `--clear` | Remove one album's artwork (file + embedded picture + thumbnail) |
 | `--dry-run` | Show what would happen, change nothing |
 
 Ripped tracks are chmod 444, so the script makes each file writable, embeds the picture and restores the read-only mode. The new `cover.jpg` is given the same mode and owner as the tracks it sits with. Afterwards the moOde library cache is cleared and rebuilt, which is what makes the new artwork show up in the WebUI.
